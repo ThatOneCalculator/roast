@@ -1,0 +1,100 @@
+name: Preview Release
+
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: preview-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build preview prerelease
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout selected revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Test
+        run: go test ./...
+
+      - name: Set preview metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          version="preview-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "short_sha=${short_sha}"
+            echo "tag=${version}"
+            echo "version=${version}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Build archives
+        shell: bash
+        env:
+          BUILD_COMMIT: ${{ steps.metadata.outputs.short_sha }}
+          BUILD_DATE: ${{ steps.metadata.outputs.date }}
+          BUILD_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist staging
+          for target in \
+            linux/amd64 linux/arm64 \
+            darwin/amd64 darwin/arm64 \
+            windows/amd64 windows/arm64
+          do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            archive="roast-preview_${BUILD_VERSION}_${goos}_${goarch}"
+            package="staging/${archive}"
+            mkdir -p "${package}"
+            binary="${package}/roast-preview"
+            if [[ "${goos}" == windows ]]; then
+              binary="${binary}.exe"
+            fi
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" go build \
+              -trimpath \
+              -ldflags "-s -w -X github.com/bluesky-social/roast/internal/buildinfo.Version=${BUILD_VERSION} -X github.com/bluesky-social/roast/internal/buildinfo.Commit=${BUILD_COMMIT} -X github.com/bluesky-social/roast/internal/buildinfo.Date=${BUILD_DATE}" \
+              -o "${binary}" ./cmd/roast
+            cp LICENSE.txt LICENSE-APACHE.txt LICENSE-MIT.txt README.md SECURITY.md "${package}/"
+            if [[ "${goos}" == windows ]]; then
+              (cd "${package}" && zip -q -r "../../dist/${archive}.zip" .)
+            else
+              tar -C "${package}" -czf "dist/${archive}.tar.gz" .
+            fi
+          done
+          (cd dist && sha256sum roast-preview_* > "roast-preview_${BUILD_VERSION}_checksums.txt")
+
+      - name: Create preview prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_COMMIT: ${{ steps.metadata.outputs.commit }}
+          PREVIEW_TAG: ${{ steps.metadata.outputs.tag }}
+          PREVIEW_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "${PREVIEW_TAG}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${PREVIEW_COMMIT}" \
+            --title "Roast preview ${PREVIEW_VERSION}" \
+            --notes "Manually dispatched OSS preview. The executable is named roast-preview and this prerelease is not a production update." \
+            --prerelease

@@ -12,6 +12,7 @@ Roast requires Go 1.27 or newer. Clone the repository, then run:
 ```sh
 go test ./...
 go vet ./...
+go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
 go build ./cmd/roast
 ```
 
@@ -28,6 +29,19 @@ the pull request.
 Keep changes narrow and include regression tests for behavior changes. Update
 the README whenever a public flag, environment variable, configuration field,
 artifact, data destination, or exit-code behavior changes.
+
+## Preview releases
+
+Maintainers can manually run the `Preview Release` GitHub Actions workflow for
+the revision selected in the workflow UI. It creates a GitHub prerelease with
+a non-production tag and a `roast-preview` executable, without updating
+Homebrew or the stable release channel. Preview visibility follows repository
+visibility.
+
+Download and unpack the archive for your platform with `gh release download`,
+then run `roast-preview`. It reads the normal Roast configuration but can live
+beside an installed `roast`. To exercise a pre-commit gate with the preview
+binary, set `ROAST_BIN=/absolute/path/to/roast-preview` for the Git operation.
 
 ## Security
 
