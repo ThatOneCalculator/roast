@@ -45,6 +45,9 @@ func newReplayCommand(stdout, stderr io.Writer) *cobra.Command {
 				return err
 			}
 
+			if err := maybeProvision(cmd, configPath, stdout); err != nil {
+				return err
+			}
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return &usageError{msg: err.Error()}

@@ -39,9 +39,20 @@ type draftProfile struct {
 // accepted only when no version is declared, then converted to complete named
 // profiles before ordinary version 1 validation runs.
 type legacyConfig struct {
+	Gateway legacyGateway         `yaml:"gateway"`
+	Upload  legacyUpload          `yaml:"upload"`
 	Roles   map[string]legacyRole `yaml:"roles"`
 	Review  Review                `yaml:"review"`
 	Prompts Prompts               `yaml:"prompts"`
+}
+
+type legacyGateway struct {
+	BaseURL string `yaml:"base_url"`
+	APIKey  string `yaml:"api_key"`
+}
+
+type legacyUpload struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type legacyRole struct {
@@ -149,6 +160,12 @@ func migrateLegacy(legacy legacyConfig) Config {
 	sort.Strings(names)
 	for _, name := range names {
 		legacyRole := legacy.Roles[name]
+		if legacyRole.BaseURL == "" {
+			legacyRole.BaseURL = legacy.Gateway.BaseURL
+		}
+		if legacyRole.APIKey == "" {
+			legacyRole.APIKey = legacy.Gateway.APIKey
+		}
 		cfg.InferenceProfiles[name] = profileFromLegacy(legacyRole)
 		role := Role{Profile: name, Pin: legacyRole.Pin}
 		routeKeys := make([]string, 0, len(legacyRole.AuthorFlip))

@@ -258,6 +258,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newRunsCommand(stdout, stderr))
 	root.AddCommand(newReplayCommand(stdout, stderr))
 	root.AddCommand(newGateCommand(stdout))
+	root.AddCommand(newConfigCommand(stdout))
 	return root
 }
 
@@ -313,6 +314,9 @@ func addRoleFlags(fl interface {
 }
 
 func runReview(cmd *cobra.Command, f *reviewFlags, stdout, stderr io.Writer) error {
+	if err := maybeProvision(cmd, f.configPath, stdout); err != nil {
+		return err
+	}
 	return runReviewWithOptions(cmd.Context(), cmd.Flags().Changed, f, stdout, stderr, reviewRunOptions{})
 }
 

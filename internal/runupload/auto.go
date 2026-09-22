@@ -37,6 +37,9 @@ func MaybeAutoUpload(cfg config.Config, recordDir, runID string) {
 }
 
 func uploadDestination(cfg config.Config) string {
+	if cfg.Upload.Backend == "presigned" {
+		return strings.TrimSuffix(cfg.Upload.Endpoint, "/")
+	}
 	return strings.TrimSuffix(cfg.Upload.Endpoint, "/") + "/" + cfg.Upload.Bucket + "/" + strings.Trim(cfg.Upload.Prefix, "/")
 }
 

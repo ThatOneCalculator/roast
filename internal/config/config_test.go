@@ -236,6 +236,7 @@ func TestLoadAndResolveS3CompatibleUpload(t *testing.T) {
 	path := writeConfig(t, `version: 1
 upload:
   enabled: true
+  backend: s3
   endpoint: https://objects.example.test/
   bucket: roast-data
   prefix: team/runs/
@@ -262,6 +263,28 @@ upload:
 	}
 	if resolved.AccessKey != "access" || resolved.SecretKey != "secret" || resolved.SessionToken != "session" {
 		t.Fatal("resolved upload credentials do not match their explicit environment sources")
+	}
+}
+
+func TestLoadAndResolvePresignedUpload(t *testing.T) {
+	path := writeConfig(t, `version: 1
+upload:
+  enabled: true
+  backend: presigned
+  endpoint: https://uploads.example.test/
+  token_env: TEST_BROKER_TOKEN
+`)
+	t.Setenv("TEST_BROKER_TOKEN", "broker-token")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := cfg.ResolveUpload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Backend != "presigned" || resolved.Endpoint != "https://uploads.example.test" || resolved.Token != "broker-token" {
+		t.Fatalf("resolved upload = %#v", resolved)
 	}
 }
 
@@ -305,10 +328,13 @@ roles:
 }
 
 func TestLoadMigratesLegacyInlineRoles(t *testing.T) {
-	path := writeConfig(t, `roles:
+	path := writeConfig(t, `gateway:
+  base_url: https://legacy-gateway.example/v1
+  api_key: shared-legacy-key
+upload:
+  enabled: true
+roles:
   finder:
-    base_url: https://legacy.example/v1
-    api_key: legacy-key
     model: gpt-finder
     api: chat
     max_output_tokens: 1234
@@ -327,12 +353,12 @@ func TestLoadMigratesLegacyInlineRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finder.Profile != "finder" || finder.BaseURL != "https://legacy.example/v1" || finder.Protocol != "chat" || finder.MaxOutputTokens != 1234 {
+	if finder.Profile != "finder" || finder.BaseURL != "https://legacy-gateway.example/v1" || finder.APIKey != "shared-legacy-key" || finder.Protocol != "chat" || finder.MaxOutputTokens != 1234 {
 		t.Fatalf("migrated finder = %#v", finder)
 	}
 	routeName := finder.AuthorRoutes["openai"]
 	route := cfg.InferenceProfiles[routeName]
-	if route.Model != "claude-reviewer" || route.Protocol != "anthropic" || route.BaseURL != "https://legacy.example/v1" || route.APIKey != "legacy-key" || route.MaxOutputTokens != 1234 {
+	if route.Model != "claude-reviewer" || route.Protocol != "anthropic" || route.BaseURL != "https://legacy-gateway.example/v1" || route.APIKey != "shared-legacy-key" || route.MaxOutputTokens != 1234 {
 		t.Fatalf("migrated author route %q = %#v", routeName, route)
 	}
 }
@@ -360,6 +386,8 @@ func TestLoadRejectsInvalidUploadConfiguration(t *testing.T) {
 		"credential in endpoint":      "upload:\n  endpoint: https://user:secret@objects.example.test\n  bucket: b\n",
 		"escaping prefix":             "upload:\n  endpoint: https://objects.example.test\n  bucket: b\n  prefix: ../runs\n",
 		"bad env name":                "upload:\n  endpoint: https://objects.example.test\n  bucket: b\n  access_key_env: not-valid!\n",
+		"presigned with bucket":       "upload:\n  backend: presigned\n  endpoint: https://uploads.example.test\n  bucket: b\n",
+		"s3 with token":               "upload:\n  backend: s3\n  endpoint: https://objects.example.test\n  bucket: b\n  token_env: TOKEN\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Load(writeConfig(t, body)); err == nil {

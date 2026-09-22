@@ -19,9 +19,12 @@ func newRunsSyncCommand(stdout io.Writer) *cobra.Command {
 	var configPath string
 	var includeExisting bool
 	cmd := &cobra.Command{
-		Use: "sync", Short: "Retry pending S3-compatible run-bundle uploads", Args: noArgs,
+		Use: "sync", Short: "Retry pending run-bundle uploads", Args: noArgs,
 		SilenceUsage: true, SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := maybeProvision(cmd, configPath, stdout); err != nil {
+				return err
+			}
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return &usageError{msg: err.Error()}

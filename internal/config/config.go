@@ -87,6 +87,7 @@ type Prompts struct {
 // they are never accepted inline or copied into run metadata.
 type Upload struct {
 	Enabled           bool   `yaml:"enabled"`
+	Backend           string `yaml:"backend"`
 	Endpoint          string `yaml:"endpoint"`
 	Bucket            string `yaml:"bucket"`
 	Prefix            string `yaml:"prefix"`
@@ -94,6 +95,8 @@ type Upload struct {
 	AccessKeyEnv      string `yaml:"access_key_env"`
 	SecretKeyEnv      string `yaml:"secret_key_env"`
 	SessionTokenEnv   string `yaml:"session_token_env"`
+	Token             string `yaml:"token"`
+	TokenEnv          string `yaml:"token_env"`
 	PathStyle         bool   `yaml:"path_style"`
 	AllowInsecureHTTP bool   `yaml:"allow_insecure_http"`
 }
@@ -101,19 +104,28 @@ type Upload struct {
 // ResolvedUpload is the runtime object-store configuration. Secret values are
 // resolved only when an upload is attempted.
 type ResolvedUpload struct {
+	Backend                            string
 	Endpoint, Bucket, Prefix, Region   string
 	AccessKey, SecretKey, SessionToken string
+	Token                              string
 	PathStyle                          bool
 }
 
 // Config is Roast's user configuration.
 type Config struct {
 	Version           int                         `yaml:"version"`
+	Provisioning      *Provisioning               `yaml:"provisioning,omitempty"`
 	InferenceProfiles map[string]InferenceProfile `yaml:"inference_profiles"`
 	Roles             map[string]Role             `yaml:"roles"`
 	Review            Review                      `yaml:"review"`
 	Prompts           Prompts                     `yaml:"prompts"`
 	Upload            Upload                      `yaml:"upload"`
+}
+
+// Provisioning contains one-time instructions honored only while installing a
+// remote configuration template. It has no effect during normal config loads.
+type Provisioning struct {
+	ImportLegacyCredential bool `yaml:"import_legacy_credential"`
 }
 
 // CredentialEnvNames returns every environment variable referenced as a
@@ -125,7 +137,7 @@ func (c Config) CredentialEnvNames() []string {
 			out = append(out, profile.APIKeyEnv)
 		}
 	}
-	for _, name := range []string{c.Upload.AccessKeyEnv, c.Upload.SecretKeyEnv, c.Upload.SessionTokenEnv} {
+	for _, name := range []string{c.Upload.AccessKeyEnv, c.Upload.SecretKeyEnv, c.Upload.SessionTokenEnv, c.Upload.TokenEnv} {
 		if name != "" {
 			out = append(out, name)
 		}
@@ -317,6 +329,13 @@ func normalize(cfg Config) (Config, error) {
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func normalizeUpload(upload *Upload) error {
+	upload.Backend = strings.ToLower(strings.TrimSpace(upload.Backend))
+	if upload.Backend == "" {
+		upload.Backend = "s3"
+	}
+	if upload.Backend != "s3" && upload.Backend != "presigned" {
+		return errors.New("upload.backend must be s3 or presigned")
+	}
 	if upload.AccessKeyEnv == "" {
 		upload.AccessKeyEnv = "ROAST_UPLOAD_ACCESS_KEY"
 	}
@@ -327,6 +346,7 @@ func normalizeUpload(upload *Upload) error {
 		"access_key_env":    upload.AccessKeyEnv,
 		"secret_key_env":    upload.SecretKeyEnv,
 		"session_token_env": upload.SessionTokenEnv,
+		"token_env":         upload.TokenEnv,
 	} {
 		if name != "" && !envNamePattern.MatchString(name) {
 			return fmt.Errorf("upload.%s is not a valid environment variable name", field)
@@ -335,14 +355,6 @@ func normalizeUpload(upload *Upload) error {
 	upload.Endpoint = strings.TrimSpace(upload.Endpoint)
 	upload.Bucket = strings.TrimSpace(upload.Bucket)
 	upload.Prefix = strings.Trim(strings.TrimSpace(upload.Prefix), "/")
-	if upload.Prefix == "" {
-		upload.Prefix = "roast-runs"
-	}
-	for _, segment := range strings.Split(upload.Prefix, "/") {
-		if segment == "" || segment == "." || segment == ".." {
-			return errors.New("upload.prefix must be a relative object-key prefix without empty, '.' or '..' segments")
-		}
-	}
 	if upload.Endpoint != "" {
 		u, err := url.Parse(upload.Endpoint)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
@@ -354,8 +366,31 @@ func normalizeUpload(upload *Upload) error {
 		u.Path = ""
 		upload.Endpoint = strings.TrimSuffix(u.String(), "/")
 	}
-	if upload.Enabled && (upload.Endpoint == "" || upload.Bucket == "") {
-		return errors.New("upload.endpoint and upload.bucket are required when upload.enabled is true")
+	if upload.Token != "" && upload.TokenEnv != "" {
+		return errors.New("upload cannot set both token and token_env")
+	}
+	if upload.Enabled && upload.Endpoint == "" {
+		return errors.New("upload.endpoint is required when upload.enabled is true")
+	}
+	if upload.Backend == "s3" {
+		if upload.Prefix == "" {
+			upload.Prefix = "roast-runs"
+		}
+		for _, segment := range strings.Split(upload.Prefix, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return errors.New("upload.prefix must be a relative object-key prefix without empty, '.' or '..' segments")
+			}
+		}
+		if upload.Enabled && upload.Bucket == "" {
+			return errors.New("upload.bucket is required for the s3 backend")
+		}
+		if upload.Token != "" || upload.TokenEnv != "" {
+			return errors.New("upload.token and upload.token_env are only valid for the presigned backend")
+		}
+	} else {
+		if upload.Bucket != "" || upload.Prefix != "" || upload.Region != "" || upload.PathStyle {
+			return errors.New("upload.bucket, upload.prefix, upload.region, and upload.path_style are only valid for the s3 backend")
+		}
 	}
 	return nil
 }
@@ -373,8 +408,24 @@ func loopbackHost(host string) bool {
 // environment variables. It intentionally does not consult AWS profiles,
 // instance metadata, SSO, or any provider-specific credential chain.
 func (c Config) ResolveUpload() (ResolvedUpload, error) {
-	if c.Upload.Endpoint == "" || c.Upload.Bucket == "" {
-		return ResolvedUpload{}, errors.New("upload endpoint and bucket are not configured")
+	if c.Upload.Endpoint == "" {
+		return ResolvedUpload{}, errors.New("upload endpoint is not configured")
+	}
+	if c.Upload.Backend == "presigned" {
+		token := c.Upload.Token
+		if token == "" && c.Upload.TokenEnv != "" {
+			token = os.Getenv(c.Upload.TokenEnv)
+		}
+		if token == "" {
+			if c.Upload.TokenEnv == "" {
+				return ResolvedUpload{}, errors.New("presigned upload token is not configured")
+			}
+			return ResolvedUpload{}, fmt.Errorf("presigned upload token is not configured (set %s)", c.Upload.TokenEnv)
+		}
+		return ResolvedUpload{Backend: "presigned", Endpoint: c.Upload.Endpoint, Token: token}, nil
+	}
+	if c.Upload.Bucket == "" {
+		return ResolvedUpload{}, errors.New("upload bucket is not configured")
 	}
 	access := os.Getenv(c.Upload.AccessKeyEnv)
 	secret := os.Getenv(c.Upload.SecretKeyEnv)
@@ -382,6 +433,7 @@ func (c Config) ResolveUpload() (ResolvedUpload, error) {
 		return ResolvedUpload{}, fmt.Errorf("upload credentials are not configured (set %s and %s)", c.Upload.AccessKeyEnv, c.Upload.SecretKeyEnv)
 	}
 	return ResolvedUpload{
+		Backend:  c.Upload.Backend,
 		Endpoint: c.Upload.Endpoint, Bucket: c.Upload.Bucket,
 		Prefix: c.Upload.Prefix, Region: c.Upload.Region,
 		AccessKey: access, SecretKey: secret,

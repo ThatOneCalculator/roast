@@ -55,7 +55,7 @@ func uploadRun(ctx context.Context, store objectStore, recordDir, runID string, 
 	if err != nil {
 		return pendingOutcome(recordDir, runID, state, store.Destination(), fmt.Errorf("open bundle: %w", err))
 	}
-	result, uploadErr := store.Put(ctx, bundle, size, digest)
+	result, uploadErr := store.Put(ctx, runID, bundle, size, digest)
 	closeErr := bundle.Close()
 	if uploadErr != nil {
 		return pendingOutcome(recordDir, runID, state, store.Destination(), fmt.Errorf("upload bundle: %w", uploadErr))

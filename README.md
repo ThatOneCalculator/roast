@@ -81,6 +81,21 @@ or local server that implements the selected wire contract.
 Configuration may also be stored in the user config directory at
 `roast/config.yaml`, or supplied with `--config`:
 
+An organization may publish a secret-free configuration template. Install it
+once with `roast config init --from https://config.example/roast`; an
+interactive first run also offers this prompt when no current config exists.
+When upgrading an unversioned pre-public config, Roast carries its existing
+credential into otherwise credential-free inference profiles and presigned
+upload configuration, leaves a `.pre-v1` backup for an in-place migration,
+and never sends that credential to the configuration URL.
+
+Credential import is disabled unless the trusted template explicitly contains:
+
+```yaml
+provisioning:
+  import_legacy_credential: true
+```
+
 ```yaml
 version: 1
 
@@ -108,6 +123,7 @@ roles:
 # S3-compatible object store. Disabled unless explicitly enabled.
 upload:
   enabled: true
+  backend: s3
   endpoint: https://objects.example.com
   bucket: roast-runs
   prefix: team-name
@@ -117,6 +133,17 @@ upload:
   # session_token_env: ROAST_UPLOAD_SESSION_TOKEN
   path_style: false
   # allow_insecure_http: false
+```
+
+Organizations which do not distribute object-store credentials can instead
+use a presigned upload broker:
+
+```yaml
+upload:
+  enabled: true
+  backend: presigned
+  endpoint: https://roast-uploads.example.com
+  token_env: ROAST_UPLOAD_TOKEN
 ```
 
 `version: 1` identifies the public configuration contract. Roast also accepts
@@ -139,7 +166,7 @@ redirect inference or supply credentials.
 `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` apply only to `anthropic`.
 Role-specific `ROAST_FINDER_*` and `ROAST_VERIFIER_*` values override them.
 
-Upload credentials are resolved only from the environment variables named by
+For the `s3` backend, upload credentials are resolved only from the environment variables named by
 `access_key_env`, `secret_key_env`, and optional `session_token_env`. Roast
 does not consult AWS profiles, SSO, instance metadata, or another provider
 credential chain. `endpoint`, `region`, and `path_style` support services such
@@ -148,6 +175,12 @@ endpoints must use HTTPS unless they are on loopback. Plaintext HTTP on another
 trusted local network requires `allow_insecure_http: true`; it sends bundle
 contents and SigV4 authentication material without transport encryption and
 must never be used across an untrusted network.
+
+The `presigned` backend sends the configured bearer token only to the broker's
+control-plane endpoint. The broker returns a short-lived PUT URL and required
+signed headers; Roast sends the bundle directly to object storage without the
+bearer token, then asks the broker to verify completion. The broker owns the
+bucket name, object prefix, and storage credentials.
 
 When the invoking agent supplies `--author-model` or `ROAST_AUTHOR_MODEL`, the
 finder can select another complete profile by exact model name or model family:
@@ -297,14 +330,61 @@ and SHA-256 digest. Roast verifies both new and reused bundles before accepting
 them and refuses symlinked or other non-regular run artifacts.
 
 When `upload.enabled` is true, Roast makes a best-effort upload after each
-completed review or replay. Objects use the content-addressed key
-`<prefix>/sha256/<bundle-digest>.tar.zst`, so retrying the same bytes is
-idempotent. Upload failures never change the review result and remain pending
+completed review or replay. Direct-S3 objects use the content-addressed key
+`<prefix>/sha256/<bundle-digest>.tar.zst`; the broker assigns a unique key and
+binds its grant to the bundle's size and SHA-256. Upload failures never change the review result and remain pending
 for `roast runs sync`; `roast runs status` reports local upload state. Runs
 which predate the first opt-in are not uploaded unless sync is given
 `--include-existing`. Invoking `runs sync` is itself an explicit upload request
 and works even while automatic upload is disabled. Upload bookkeeping is
 stored outside run directories and is never included in a bundle.
+
+## Presigned upload broker
+
+This repository includes the stateless `roast-broker` service and a root
+`Dockerfile`. It expects authentication to be enforced by a trusted reverse
+proxy. For `/api/v1/roast/runs` and its completion endpoint, the proxy must
+remove the configured principal header from incoming requests, validate
+`Authorization: Bearer`, and inject the verified principal. `/healthz` and the
+optional, secret-free `/config/v1` are intentionally unauthenticated so a new
+client can fetch configuration before it has credentials. Never expose the
+container directly to untrusted clients, because all routes share one listener
+and the API trusts only the proxy-injected principal header.
+
+Required environment variables are:
+
+```text
+ROAST_BROKER_PRINCIPAL_HEADER=X-Forwarded-Email
+ROAST_BROKER_SIGNING_KEY=<at least 32 random bytes>
+ROAST_BROKER_S3_ENDPOINT=https://objects.example.com
+ROAST_BROKER_S3_BUCKET=roast-runs
+```
+
+Static S3-compatible credentials may be supplied with
+`ROAST_BROKER_S3_ACCESS_KEY`, `ROAST_BROKER_S3_SECRET_KEY`, and optional
+`ROAST_BROKER_S3_SESSION_TOKEN`. With those unset, the MinIO client uses its
+IAM/workload-identity credential source. Optional settings include
+`ROAST_BROKER_S3_REGION`, `ROAST_BROKER_S3_PREFIX`,
+`ROAST_BROKER_S3_PATH_STYLE`, `ROAST_BROKER_MAX_BUNDLE_BYTES`, and
+`ROAST_BROKER_LISTEN_ADDRESS`.
+
+Mounting a validated, secret-free client config and setting
+`ROAST_BROKER_CLIENT_CONFIG_FILE` serves it at `/config/v1`, making the broker
+itself a configuration URL. Startup fails if that document is unversioned,
+invalid, or contains inline inference or broker credentials.
+
+The version-1 broker protocol is deliberately small:
+
+- `POST /api/v1/roast/runs` declares the run ID, bundle length, and SHA-256 and
+  returns a content-bound presigned PUT plus an opaque completion token.
+- The client performs the PUT with exactly the returned headers and without
+  its broker credential.
+- `POST /api/v1/roast/runs/{run_id}/complete` presents the opaque token; the
+  broker verifies principal ownership and the stored object's length and
+  checksum.
+
+Each grant uses a unique object key, so the broker requires no database.
+Operators should configure bucket lifecycle expiration for abandoned uploads.
 
 Local run artifacts are retained indefinitely and are never deleted
 automatically. `roast runs prune` only removes snapshot refs in the current

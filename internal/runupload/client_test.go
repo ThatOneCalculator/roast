@@ -2,6 +2,7 @@ package runupload
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +47,7 @@ func TestS3CompatibleStoreUsesExplicitCredentialsAndContentAddressedKey(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := store.Put(t.Context(), bytes.NewReader(body), int64(len(body)), "abc123")
+	result, err := store.Put(t.Context(), "run-1", bytes.NewReader(body), int64(len(body)), "abc123")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,5 +56,52 @@ func TestS3CompatibleStoreUsesExplicitCredentialsAndContentAddressedKey(t *testi
 	}
 	if result.Key != "team/roast/sha256/abc123.tar.zst" || result.ETag != "etag-value" || result.VersionID != "version-1" {
 		t.Fatalf("upload result = %#v", result)
+	}
+}
+
+func TestPresignedStoreUsesBearerOnlyForControlPlane(t *testing.T) {
+	body := []byte("bundle bytes")
+	var dataAuthorization string
+	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dataAuthorization = r.Header.Get("Authorization")
+		if r.Header.Get("X-Bound") != "yes" {
+			http.Error(w, "missing bound header", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("ETag", `"etag"`)
+		w.Header().Set("x-amz-version-id", "v1")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer data.Close()
+	var complete bool
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer broker-secret" {
+			http.Error(w, "bad bearer", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/roast/runs":
+			_ = json.NewEncoder(w).Encode(uploadGrant{
+				RunID: "run-1", AttemptID: "attempt", ObjectKey: "runs/run-1/bundle.tar.zst",
+				Method: http.MethodPut, UploadURL: data.URL, RequiredHeaders: map[string]string{"X-Bound": "yes"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/roast/runs/run-1/complete":
+			complete = true
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "uploaded"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer control.Close()
+	store, err := NewStore(config.ResolvedUpload{Backend: "presigned", Endpoint: control.URL, Token: "broker-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.Put(t.Context(), "run-1", bytes.NewReader(body), int64(len(body)), strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete || dataAuthorization != "" || result.Key != "runs/run-1/bundle.tar.zst" || result.VersionID != "v1" {
+		t.Fatalf("complete=%v data auth=%q result=%#v", complete, dataAuthorization, result)
 	}
 }

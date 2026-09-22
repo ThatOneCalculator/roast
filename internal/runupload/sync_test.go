@@ -26,7 +26,7 @@ type fakeStore struct {
 
 func (f *fakeStore) Destination() string { return f.destination }
 
-func (f *fakeStore) Put(_ context.Context, body io.Reader, _ int64, digest string) (uploadResult, error) {
+func (f *fakeStore) Put(_ context.Context, _ string, body io.Reader, _ int64, digest string) (uploadResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.puts++

@@ -55,6 +55,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Build upload broker
+        run: go build ./cmd/roast-broker
+
       - name: Compile Windows
         env:
           CGO_ENABLED: "0"
