@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 const assetRoot = "assets/roast"
@@ -33,6 +35,13 @@ type Status struct {
 	Stale []string
 }
 
+// InstallationTarget is one harness-visible parent directory for the skill.
+type InstallationTarget struct {
+	Harness string
+	Parent  string
+	Path    string
+}
+
 // DefaultParent returns the shared user skill directory used by Codex and
 // other agents which implement the Agent Skills convention.
 func DefaultParent() (string, error) {
@@ -54,6 +63,68 @@ func Target(parent string) (string, error) {
 		}
 	}
 	return filepath.Join(parent, "roast"), nil
+}
+
+// InstallationTargets returns the explicit --dir target, or the shared Agent
+// Skills location plus Claude's location when Claude is detected. The shared
+// location is always included because it is the portable Agent Skills target
+// and preserves Roast's existing default.
+func InstallationTargets(parent string) ([]InstallationTarget, error) {
+	if parent != "" {
+		path, err := Target(parent)
+		if err != nil {
+			return nil, err
+		}
+		return []InstallationTarget{{Harness: "custom", Parent: parent, Path: path}}, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve user home: %w", err)
+	}
+	claudeRoot := configuredRoot(home, os.Getenv("CLAUDE_CONFIG_DIR"), ".claude")
+	claudePresent := os.Getenv("CLAUDE_CONFIG_DIR") != "" || directoryExists(claudeRoot)
+	if !claudePresent {
+		_, claudeErr := exec.LookPath("claude")
+		claudePresent = claudeErr == nil
+	}
+	return installationTargets(home, claudeRoot, claudePresent), nil
+}
+
+func installationTargets(home, claudeRoot string, claudePresent bool) []InstallationTarget {
+	parents := []InstallationTarget{{Harness: "agents", Parent: filepath.Join(home, ".agents", "skills")}}
+	if claudePresent {
+		parents = append(parents, InstallationTarget{Harness: "claude", Parent: filepath.Join(claudeRoot, "skills")})
+	}
+	seen := make(map[string]bool, len(parents))
+	out := make([]InstallationTarget, 0, len(parents))
+	for _, target := range parents {
+		target.Parent = filepath.Clean(target.Parent)
+		target.Path = filepath.Join(target.Parent, "roast")
+		if seen[target.Path] {
+			continue
+		}
+		seen[target.Path] = true
+		out = append(out, target)
+	}
+	return out
+}
+
+func configuredRoot(home, override, fallback string) string {
+	switch {
+	case override == "":
+		return filepath.Join(home, fallback)
+	case override == "~":
+		return home
+	case strings.HasPrefix(override, "~/"):
+		return filepath.Join(home, override[2:])
+	default:
+		return filepath.Clean(override)
+	}
+}
+
+func directoryExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func embeddedFiles() (map[string][]byte, error) {

@@ -44,17 +44,17 @@ releases. The check never blocks a command or changes its exit status. Network
 and cache failures fail open; update with Homebrew or the installation method
 you originally used. Set `ROAST_NO_UPDATE_CHECK=1` to disable the check.
 
-To install the bundled Agent Skill for Codex and other Agent Skills-compatible
-harnesses:
+To install the bundled Agent Skill:
 
 ```sh
 roast skill install
 roast skill status
 ```
 
-The default destination is `~/.agents/skills/roast`. Use
-`--dir ~/.claude/skills` with either command for Claude Code or `--dir` with
-another harness's parent skills directory.
+Roast always installs to the shared `~/.agents/skills/roast` location and also
+installs to `$CLAUDE_CONFIG_DIR/skills/roast` (or `~/.claude/skills/roast`) when
+Claude Code is detected. `roast skill status` reports every detected target.
+Use `--dir` to operate on only one explicit parent skills directory.
 
 ## Configure
 
@@ -255,10 +255,17 @@ roast runs sync
 roast doctor
 ```
 
-`roast doctor` validates the resolved profiles and credentials, performs a
-non-generative authenticated `GET` of each provider's `/models` endpoint, and
-reports Git/gate, Agent Skill, upload, and release status. Use `--json` for
+`roast doctor` validates the resolved profiles and credentials, performs an
+authenticated `GET` of each provider's `/models` endpoint, then makes one small
+forced-tool inference request through each configured model and protocol. It
+also reports Git/gate, Agent Skill, upload, and release status. Use `--json` for
 machine-readable results.
+
+On the first interactive review in a repository, Roast asks once whether to
+install its staged-content pre-commit gate. The answer is stored in local Git
+config for that repository; a decline is not prompted again. Non-interactive
+runs never install a hook. Manage the decision explicitly with
+`roast gate enable|status|disable`.
 
 The default scope includes committed changes since the best available main
 branch plus uncommitted and untracked changes. JSON is written to stdout and
@@ -269,7 +276,9 @@ the inference endpoints you configure. Chat and Responses use bearer
 authorization; native Anthropic uses `x-api-key`. When upload is enabled, the
 complete run bundle is also sent to the configured object-store endpoint.
 Roast sends no review data anywhere else. Review your providers' data-handling
-terms before using Roast on sensitive repositories.
+terms before using Roast on sensitive repositories. See the
+[security model](docs/security-model.md) for the complete trust and artifact
+boundaries.
 
 ## Resource limits
 

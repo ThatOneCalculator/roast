@@ -63,7 +63,17 @@ func newGateEnableCommand(stdout io.Writer) *cobra.Command {
 			if err := gate.RecordDecision(repo, gate.DecisionEnabled); err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "gate enabled: %s\nbypass one commit with: ROAST_SKIP=1 git commit ...\n", status.HookPath)
+			switch action {
+			case gate.ActionInstalled:
+				fmt.Fprintf(stdout, "gate installed: %s\n", status.HookPath)
+			case gate.ActionAppended:
+				fmt.Fprintf(stdout, "gate appended to existing hook: %s\n", status.HookPath)
+			case gate.ActionRefreshed:
+				fmt.Fprintf(stdout, "gate refreshed: %s\n", status.HookPath)
+			case gate.ActionUpToDate:
+				fmt.Fprintf(stdout, "gate already up to date: %s\n", status.HookPath)
+			}
+			fmt.Fprintln(stdout, "bypass one commit with: ROAST_SKIP=1 git commit ...")
 			return nil
 		},
 	}

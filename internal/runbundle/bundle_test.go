@@ -1,12 +1,17 @@
 package runbundle
 
 import (
+	"archive/tar"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestBuildIsDeterministicAcrossDirectoriesAndTimestamps(t *testing.T) {
@@ -107,6 +112,50 @@ func TestVerifyRejectsManifestDigestMismatch(t *testing.T) {
 	}
 	if _, err := Verify(path); err == nil || !strings.Contains(err.Error(), "digest does not match") {
 		t.Fatalf("Verify() error = %v, want digest mismatch", err)
+	}
+}
+
+func TestVerifyAcceptsLegacyNULRegularFileType(t *testing.T) {
+	path := filepath.Join(t.TempDir(), BundleFile)
+	data := []byte("metadata\n")
+	sum := sha256.Sum256(data)
+	manifestData, err := json.Marshal(Manifest{
+		Format: Format, Version: Version,
+		Files: []ManifestEntry{{Path: "meta.json", SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw, err := zstd.NewWriter(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tw := tar.NewWriter(zw)
+	for _, file := range []archiveFile{{name: ManifestFile, data: manifestData}, {name: "meta.json", data: data}} {
+		// A NUL type flag is the historical alternate spelling of a regular file.
+		hdr := &tar.Header{Name: file.name, Typeflag: 0, Mode: 0o644, Size: int64(len(file.data))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(file.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Verify(path); err != nil {
+		t.Fatalf("Verify() rejected legacy regular file type: %v", err)
 	}
 }
 

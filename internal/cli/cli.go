@@ -15,10 +15,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/bluesky-social/roast/internal/buildinfo"
 	"github.com/bluesky-social/roast/internal/config"
 	rcontext "github.com/bluesky-social/roast/internal/context"
+	"github.com/bluesky-social/roast/internal/gate"
 	"github.com/bluesky-social/roast/internal/llm"
 	"github.com/bluesky-social/roast/internal/prompts"
 	"github.com/bluesky-social/roast/internal/record"
@@ -119,6 +121,8 @@ func (e *gateExit) Error() string { return fmt.Sprintf("exit %d", e.code) }
 type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
+
+var gateBootstrapCommands = map[string]bool{"roast": true, "review": true}
 
 type reviewFlags struct {
 	configPath      string
@@ -223,10 +227,11 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		Args:          noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if _, err := scope.GitRoot("."); err != nil {
+				fmt.Fprintln(stderr, "roast: not in a Git repository; cd into one to review, or try `roast doctor` / `roast --help`")
 				if helpErr := cmd.Help(); helpErr != nil {
 					return helpErr
 				}
-				return &usageError{msg: "not in a Git repository; cd into one to review"}
+				return nil
 			}
 			return runReview(cmd, &rootFlags, stdout, stderr)
 		},
@@ -238,6 +243,9 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 			return &usageError{msg: fmt.Sprintf("invalid --error-format %q (text|json)", format)}
 		}
 		startUpdateCheck(cmd.Context(), cmd.Name(), format, stderr)
+		if gateBootstrapCommands[cmd.Name()] {
+			maybeBootstrapGate(stderr)
+		}
 		return nil
 	}
 	root.SetFlagErrorFunc(flagUsageError)
@@ -263,6 +271,22 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newSkillCommand(stdout))
 	root.AddCommand(newDoctorCommand(stdout))
 	return root
+}
+
+func maybeBootstrapGate(stderr io.Writer) {
+	repo, err := scope.GitRoot(".")
+	if err != nil {
+		return
+	}
+	opts := gate.BootstrapOptions{Repo: repo, Out: stderr}
+	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
+		opts.Prompt = func(question string) (bool, error) {
+			return promptYesDefault(stderr, os.Stdin, question)
+		}
+	}
+	if _, err := gate.Bootstrap(opts); err != nil {
+		fmt.Fprintf(stderr, "roast: pre-commit gate setup skipped: %v\n", err)
+	}
 }
 
 func startUpdateCheck(ctx context.Context, command, errorFormat string, stderr io.Writer) {

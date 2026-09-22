@@ -17,6 +17,8 @@ import (
 	fantasyanthropic "charm.land/fantasy/providers/anthropic"
 	fantasyopenai "charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
+
+	"github.com/bluesky-social/roast/internal/buildinfo"
 )
 
 const (
@@ -71,14 +73,14 @@ func New(ctx context.Context, cfg ClientConfig) (Client, error) {
 			openaicompat.WithAPIKey(cfg.APIKey),
 			openaicompat.WithBaseURL(cfg.BaseURL),
 			openaicompat.WithHTTPClient(httpClient),
-			openaicompat.WithUserAgent("roast"),
+			openaicompat.WithUserAgent(userAgent()),
 		)
 	case "responses":
 		provider, err = fantasyopenai.New(
 			fantasyopenai.WithAPIKey(cfg.APIKey),
 			fantasyopenai.WithBaseURL(cfg.BaseURL),
 			fantasyopenai.WithHTTPClient(httpClient),
-			fantasyopenai.WithUserAgent("roast"),
+			fantasyopenai.WithUserAgent(userAgent()),
 			fantasyopenai.WithUseResponsesAPI(),
 			fantasyopenai.WithResponsesAPIFunc(func(string) bool { return true }),
 		)
@@ -90,7 +92,7 @@ func New(ctx context.Context, cfg ClientConfig) (Client, error) {
 			fantasyanthropic.WithAPIKey(cfg.APIKey),
 			fantasyanthropic.WithBaseURL(baseURL),
 			fantasyanthropic.WithHTTPClient(httpClient),
-			fantasyanthropic.WithUserAgent("roast"),
+			fantasyanthropic.WithUserAgent(userAgent()),
 		)
 	default:
 		return nil, fmt.Errorf("unsupported inference protocol %q", cfg.Protocol)
@@ -104,6 +106,8 @@ func New(ctx context.Context, cfg ClientConfig) (Client, error) {
 	}
 	return &client{cfg: cfg, model: mdl}, nil
 }
+
+func userAgent() string { return "roast/" + buildinfo.Version }
 
 func (c *client) Name() string { return c.cfg.Model }
 

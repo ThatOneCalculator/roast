@@ -32,33 +32,38 @@ func newSkillInstallCommand(stdout io.Writer) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			target, err := skill.Target(parent)
+			targets, err := skill.InstallationTargets(parent)
 			if err != nil {
 				return err
 			}
-			before, err := skill.Inspect(target)
-			if err != nil {
-				return err
-			}
-			after, err := skill.Install(target, force)
-			if err != nil {
-				if len(before.Stale) > 0 {
-					fmt.Fprintf(stdout, "stale files: %s\n", strings.Join(before.Stale, ", "))
+			before := make([]skill.Status, len(targets))
+			for i, target := range targets {
+				before[i], err = skill.Inspect(target.Path)
+				if err != nil {
+					return err
 				}
-				return err
+				if before[i].State == skill.Stale && !force {
+					return fmt.Errorf("%s skill files differ (%s); re-run with --force to overwrite", target.Harness, strings.Join(before[i].Stale, ", "))
+				}
 			}
-			switch before.State {
-			case skill.Symlink:
-				fmt.Fprintf(stdout, "symlink (development install), left unchanged: %s\n", target)
-			case skill.UpToDate:
-				fmt.Fprintf(stdout, "already up to date: %s\n", target)
-			default:
-				fmt.Fprintf(stdout, "installed: %s (%s)\n", target, after.State)
+			for i, target := range targets {
+				after, installErr := skill.Install(target.Path, force)
+				if installErr != nil {
+					return installErr
+				}
+				switch before[i].State {
+				case skill.Symlink:
+					fmt.Fprintf(stdout, "%s\tsymlink (development install), left unchanged\t%s\n", target.Harness, target.Path)
+				case skill.UpToDate:
+					fmt.Fprintf(stdout, "%s\talready up to date\t%s\n", target.Harness, target.Path)
+				default:
+					fmt.Fprintf(stdout, "%s\tinstalled (%s)\t%s\n", target.Harness, after.State, target.Path)
+				}
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&parent, "dir", "", "parent skills directory (default: ~/.agents/skills; /roast is appended)")
+	cmd.Flags().StringVar(&parent, "dir", "", "install only below this parent skills directory; /roast is appended")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite installed skill files that differ")
 	return cmd
 }
@@ -72,22 +77,24 @@ func newSkillStatusCommand(stdout io.Writer) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			target, err := skill.Target(parent)
+			targets, err := skill.InstallationTargets(parent)
 			if err != nil {
 				return err
 			}
-			status, err := skill.Inspect(target)
-			if err != nil {
-				return err
+			for _, target := range targets {
+				status, inspectErr := skill.Inspect(target.Path)
+				if inspectErr != nil {
+					return inspectErr
+				}
+				fmt.Fprintf(stdout, "%s\t%s\t%s", target.Harness, status.State, status.Path)
+				if len(status.Stale) > 0 {
+					fmt.Fprintf(stdout, "\t%s", strings.Join(status.Stale, ","))
+				}
+				fmt.Fprintln(stdout)
 			}
-			fmt.Fprintf(stdout, "%s\t%s", status.State, status.Path)
-			if len(status.Stale) > 0 {
-				fmt.Fprintf(stdout, "\t%s", strings.Join(status.Stale, ","))
-			}
-			fmt.Fprintln(stdout)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&parent, "dir", "", "parent skills directory (default: ~/.agents/skills; /roast is appended)")
+	cmd.Flags().StringVar(&parent, "dir", "", "inspect only below this parent skills directory; /roast is appended")
 	return cmd
 }

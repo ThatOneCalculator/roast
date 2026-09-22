@@ -20,7 +20,7 @@ func TestSkillInstallAndStatusCommands(t *testing.T) {
 
 	stdout.Reset()
 	code, err = ExecuteContext(t.Context(), []string{"skill", "status", "--dir", parent}, &stdout, &stderr)
-	if err != nil || code != ExitClean || !strings.HasPrefix(stdout.String(), "up_to_date\t") {
+	if err != nil || code != ExitClean || !strings.HasPrefix(stdout.String(), "custom\tup_to_date\t") {
 		t.Fatalf("status code=%d err=%v stdout=%s stderr=%s", code, err, stdout.String(), stderr.String())
 	}
 }

@@ -26,6 +26,12 @@ func anthropicResponse(tool, arguments string) map[string]any {
 	}
 }
 
+func TestUserAgentIncludesBuildVersion(t *testing.T) {
+	if got := userAgent(); got != "roast/dev" {
+		t.Fatalf("userAgent() = %q, want roast/dev", got)
+	}
+}
+
 func TestAnthropicAgentUsesNativeMessages(t *testing.T) {
 	var mu sync.Mutex
 	var requests []map[string]any

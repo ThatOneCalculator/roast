@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/bluesky-social/roast/internal/buildinfo"
 	"github.com/bluesky-social/roast/internal/config"
 	"github.com/bluesky-social/roast/internal/gate"
+	"github.com/bluesky-social/roast/internal/llm"
 	"github.com/bluesky-social/roast/internal/scope"
 	"github.com/bluesky-social/roast/internal/skill"
 	"github.com/bluesky-social/roast/internal/updatecheck"
@@ -103,6 +105,14 @@ func doctorChecks(ctx context.Context, configPath string) []doctorResult {
 			results = append(results, doctorResult{name + "-profile", doctorFail, resolveErr.Error()})
 			continue
 		}
+		if name == "finder" {
+			flip, flipErr := cfg.ResolveFinderFlip(role, config.AuthorModel())
+			if flipErr != nil {
+				results = append(results, doctorResult{name + "-profile", doctorFail, flipErr.Error()})
+				continue
+			}
+			role = flip.Role
+		}
 		if validateErr := config.ValidateRole(name, role); validateErr != nil {
 			results = append(results, doctorResult{name + "-profile", doctorFail, validateErr.Error()})
 			continue
@@ -112,6 +122,7 @@ func doctorChecks(ctx context.Context, configPath string) []doctorResult {
 			Detail: fmt.Sprintf("%s: %s via %s at %s", role.Profile, role.Model, role.Protocol, role.BaseURL),
 		})
 		results = append(results, doctorEndpointCheck(ctx, client, name, role))
+		results = append(results, doctorRoundtripCheck(ctx, name, role))
 	}
 
 	if !cfg.Upload.Enabled {
@@ -122,6 +133,48 @@ func doctorChecks(ctx context.Context, configPath string) []doctorResult {
 		results = append(results, doctorResult{"uploads", doctorPass, fmt.Sprintf("%s backend at %s", upload.Backend, upload.Endpoint)})
 	}
 	return append(results, doctorLocalChecks(ctx)...)
+}
+
+func doctorRoundtripCheck(ctx context.Context, name string, role config.ResolvedRole) doctorResult {
+	maxOutputTokens := role.MaxOutputTokens
+	if maxOutputTokens <= 0 || maxOutputTokens > 512 {
+		maxOutputTokens = 512
+	}
+	probeContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	client, err := llm.New(probeContext, llm.ClientConfig{
+		Role: name, BaseURL: role.BaseURL, APIKey: role.APIKey, Model: role.Model,
+		Protocol: role.Protocol, MaxOutputTokens: maxOutputTokens,
+		MaxAttempts: 1, RequestTimeout: 15 * time.Second,
+	})
+	if err != nil {
+		return doctorResult{name + "-roundtrip", doctorFail, err.Error()}
+	}
+	final := llm.Tool{
+		Name: "doctor_probe", Description: "Return the diagnostic result.",
+		Schema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"ok": map[string]any{"type": "boolean"}},
+			"required":   []string{"ok"}, "additionalProperties": false,
+		},
+	}
+	var output struct {
+		OK bool `json:"ok"`
+	}
+	err = client.Converse(probeContext,
+		"Call doctor_probe exactly once with ok=true.",
+		"Return the diagnostic result now.",
+		llm.ConverseOpts{Tools: []llm.Tool{final}, FinalTool: final.Name, MaxTurns: 1}, &output)
+	if err != nil {
+		if errors.Is(err, llm.ErrAuth) {
+			return doctorResult{name + "-roundtrip", doctorFail, "credential rejected by the configured inference route"}
+		}
+		return doctorResult{name + "-roundtrip", doctorFail, fmt.Sprintf("%s/%s forced-tool probe failed: %v", role.Protocol, role.Model, err)}
+	}
+	if !output.OK {
+		return doctorResult{name + "-roundtrip", doctorFail, "doctor_probe returned ok=false"}
+	}
+	return doctorResult{name + "-roundtrip", doctorPass, fmt.Sprintf("%s via %s", role.Model, role.Protocol)}
 }
 
 func doctorBuildCheck() doctorResult {

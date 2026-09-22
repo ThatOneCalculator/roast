@@ -156,7 +156,7 @@ func TestPublicCommandSurface(t *testing.T) {
 	}
 }
 
-func TestBareCommandOutsideGitIsUsageError(t *testing.T) {
+func TestBareCommandOutsideGitShowsHelp(t *testing.T) {
 	old, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -168,11 +168,35 @@ func TestBareCommandOutsideGitIsUsageError(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code, runErr := ExecuteContext(t.Context(), nil, &stdout, &stderr)
-	if code != ExitUsage || runErr == nil {
+	if code != ExitClean || runErr != nil {
 		t.Fatalf("code=%d err=%v stdout=%s stderr=%s", code, runErr, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(runErr.Error(), "not in a Git repository") || !strings.Contains(stdout.String(), "Usage:") {
-		t.Fatalf("unexpected error/help: err=%v stdout=%s", runErr, stdout.String())
+	if !strings.Contains(stderr.String(), "not in a Git repository") || !strings.Contains(stdout.String(), "Usage:") {
+		t.Fatalf("unexpected help: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestExplicitReviewOutsideGitStillFails(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("ROAST_FINDER_MODEL", "finder-test")
+	t.Setenv("ROAST_VERIFIER_MODEL", "verifier-test")
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	var stdout, stderr bytes.Buffer
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, runErr := ExecuteContext(t.Context(), []string{"review", "--config", configPath}, &stdout, &stderr)
+	if code != ExitUsage || runErr == nil || !strings.Contains(runErr.Error(), "not inside a git repository") {
+		t.Fatalf("code=%d err=%v stdout=%s stderr=%s", code, runErr, stdout.String(), stderr.String())
 	}
 }
 

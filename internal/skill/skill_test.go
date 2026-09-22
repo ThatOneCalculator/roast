@@ -69,3 +69,30 @@ func TestInspectTreatsTargetSymlinkAsDevelopmentInstall(t *testing.T) {
 		t.Fatalf("Inspect() = %#v, %v", status, err)
 	}
 }
+
+func TestInstallationTargetsIncludeAgentsAndDetectedClaude(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "home", "alice")
+	targets := installationTargets(home, filepath.Join(home, ".claude"), true)
+	want := []InstallationTarget{
+		{Harness: "agents", Parent: filepath.Join(home, ".agents", "skills"), Path: filepath.Join(home, ".agents", "skills", "roast")},
+		{Harness: "claude", Parent: filepath.Join(home, ".claude", "skills"), Path: filepath.Join(home, ".claude", "skills", "roast")},
+	}
+	if !reflect.DeepEqual(targets, want) {
+		t.Fatalf("installationTargets() = %#v, want %#v", targets, want)
+	}
+}
+
+func TestInstallationTargetsSkipUndetectedClaude(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "home", "alice")
+	targets := installationTargets(home, filepath.Join(home, ".claude"), false)
+	if len(targets) != 1 || targets[0].Harness != "agents" {
+		t.Fatalf("installationTargets() = %#v", targets)
+	}
+}
+
+func TestConfiguredRootExpandsHome(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "home", "alice")
+	if got := configuredRoot(home, "~/claude-config", ".claude"); got != filepath.Join(home, "claude-config") {
+		t.Fatalf("configuredRoot() = %q", got)
+	}
+}

@@ -312,6 +312,7 @@ func Verify(path string) (Manifest, error) {
 		if err != nil {
 			return Manifest{}, fmt.Errorf("read tar: %w", err)
 		}
+		//lint:ignore SA1019 TypeRegA remains valid when reading legacy tar archives.
 		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
 			return Manifest{}, fmt.Errorf("bundle entry %q is not a regular file", hdr.Name)
 		}

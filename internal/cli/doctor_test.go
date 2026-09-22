@@ -30,8 +30,25 @@ func TestDoctorEndpointCheck(t *testing.T) {
 }
 
 func TestDoctorJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[]}`))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "resp-doctor", "object": "response", "created_at": 1,
+			"status": "completed", "model": "doctor-model",
+			"output": []any{map[string]any{
+				"id": "fc-doctor", "type": "function_call", "call_id": "call-doctor",
+				"name": "doctor_probe", "arguments": `{"ok":true}`, "status": "completed",
+			}},
+			"usage": map[string]any{
+				"input_tokens": 10, "output_tokens": 3, "total_tokens": 13,
+				"input_tokens_details":  map[string]any{"cached_tokens": 0},
+				"output_tokens_details": map[string]any{"reasoning_tokens": 0},
+			},
+		})
 	}))
 	defer server.Close()
 	t.Setenv("DOCTOR_KEY", "secret")
@@ -54,5 +71,25 @@ func TestDoctorJSON(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "secret") {
 		t.Fatal("doctor output exposed a credential")
+	}
+}
+
+func TestDoctorRoundtripUsesConfiguredResponsesRoute(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer secret" {
+			t.Errorf("path=%q auth=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp","object":"response","created_at":1,"status":"completed","model":"finder-model","output":[{"id":"fc","type":"function_call","call_id":"call","name":"doctor_probe","arguments":"{\"ok\":true}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`))
+	}))
+	defer server.Close()
+	result := doctorRoundtripCheck(t.Context(), "finder", config.ResolvedRole{
+		BaseURL: server.URL + "/v1", APIKey: "secret", Model: "finder-model",
+		Protocol: "responses", MaxOutputTokens: 1024,
+	})
+	if result.Status != doctorPass || calls != 1 {
+		t.Fatalf("doctorRoundtripCheck() = %#v, calls=%d", result, calls)
 	}
 }
