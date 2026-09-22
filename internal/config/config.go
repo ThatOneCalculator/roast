@@ -476,12 +476,6 @@ func (c Config) ResolveRole(name string) (ResolvedRole, error) {
 	return c.resolveProfile(name, selection.Profile, selection)
 }
 
-// ResolveProfile resolves a named profile in the environment of a role. It is
-// used by replay to recover a current credential for a recorded profile.
-func (c Config) ResolveProfile(roleName, profileName string) (ResolvedRole, error) {
-	return c.resolveProfile(roleName, profileName, Role{})
-}
-
 func (c Config) resolveProfile(roleName, profileName string, selection Role) (ResolvedRole, error) {
 	profile, ok := c.InferenceProfiles[profileName]
 	if !ok {
@@ -550,8 +544,8 @@ func providerAPIKey(protocol string) string {
 }
 
 // RoleScopedAPIKey resolves only an explicitly role-scoped Roast credential.
-// Replay uses this until it proves that current profile configuration matches
-// the recorded endpoint and protocol.
+// It lets CLI overrides change protocols without accidentally reusing a
+// provider-specific credential selected for the previous protocol.
 func RoleScopedAPIKey(roleName string) string {
 	return os.Getenv("ROAST_" + strings.ToUpper(roleName) + "_API_KEY")
 }

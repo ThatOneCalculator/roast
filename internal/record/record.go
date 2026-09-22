@@ -1,8 +1,8 @@
 // Package record persists one JSONL line per review run and scans prior runs
 // for matching finding fingerprints (dedup). It exposes checked writes for
-// user-facing review/replay commands and best-effort compatibility wrappers
-// for batch/eval code with a separate durable result store. The record dir
-// defaults to ~/.local/share/roast; override with ROAST_RECORD_DIR.
+// user-facing reviews and best-effort compatibility wrappers for local tools.
+// The record dir defaults to ~/.local/share/roast; override with
+// ROAST_RECORD_DIR.
 package record
 
 import (
@@ -23,10 +23,9 @@ import (
 
 // DefaultDir is the record directory: ROAST_RECORD_DIR if set, else
 // the operating system's user-data directory. Returns "" if the directory
-// can't be resolved; checked review and
-// replay writes reject that state, while compatibility/eval wrappers treat it
-// as recording disabled. Exported so the `runs` command resolves the same path
-// instead of duplicating the logic.
+// can't be resolved; checked review writes reject that state, while
+// compatibility wrappers treat it as recording disabled. Exported so the
+// `runs` command resolves the same path instead of duplicating the logic.
 func DefaultDir() string {
 	if d := os.Getenv("ROAST_RECORD_DIR"); d != "" {
 		return d
@@ -95,7 +94,7 @@ func NewRunID() string {
 
 // WriteReportRequired writes the rendered markdown report into the run's
 // artifact directory and reports the real filesystem error. User-facing
-// review/replay commands use this to enforce the durable-report contract.
+// reviews use this to enforce the durable-report contract.
 func WriteReportRequired(runID, markdown string) (string, error) {
 	dir := DefaultDir()
 	if dir == "" {
@@ -115,8 +114,8 @@ func WriteReportRequired(runID, markdown string) (string, error) {
 	return path, nil
 }
 
-// WriteReport is the best-effort compatibility wrapper for batch/eval code.
-// User-facing review/replay paths must call WriteReportRequired instead.
+// WriteReport is the best-effort compatibility wrapper for local tools.
+// User-facing review paths must call WriteReportRequired instead.
 func WriteReport(runID, markdown string) string {
 	path, _ := WriteReportRequired(runID, markdown)
 	return path

@@ -10,10 +10,10 @@ finder and verifier may use different endpoints and wire protocols.
 
 ## Current status
 
-Roast supports local review, repository survey, record, replay, labeling, an
-optional Git gate, and optional S3-compatible run uploads. It has no telemetry
-or external retrieval tools. In interactive mode, models can only navigate the
-local checkout with bounded file, grep, and listing tools.
+Roast supports local review, repository survey, durable run records, labeling,
+an optional Git gate, and optional S3-compatible run uploads. It has no
+telemetry or external retrieval tools. In interactive mode, models can only
+navigate the local checkout with bounded file, grep, and listing tools.
 
 ## Build
 
@@ -38,6 +38,23 @@ go install github.com/bluesky-social/roast/cmd/roast@latest
 
 Source builds use the command shown above. Run `roast --version` to inspect the
 version, commit, and build date stamped into a release binary.
+
+Released binaries perform a cached, informational check for newer stable GitHub
+releases. The check never blocks a command or changes its exit status. Network
+and cache failures fail open; update with Homebrew or the installation method
+you originally used. Set `ROAST_NO_UPDATE_CHECK=1` to disable the check.
+
+To install the bundled Agent Skill for Codex and other Agent Skills-compatible
+harnesses:
+
+```sh
+roast skill install
+roast skill status
+```
+
+The default destination is `~/.agents/skills/roast`. Use
+`--dir ~/.claude/skills` with either command for Claude Code or `--dir` with
+another harness's parent skills directory.
 
 ## Configure
 
@@ -235,8 +252,13 @@ roast runs
 roast runs show <run-id>
 roast runs status
 roast runs sync
-roast replay <run-id>
+roast doctor
 ```
+
+`roast doctor` validates the resolved profiles and credentials, performs a
+non-generative authenticated `GET` of each provider's `/models` endpoint, and
+reports Git/gate, Agent Skill, upload, and release status. Use `--json` for
+machine-readable results.
 
 The default scope includes committed changes since the best available main
 branch plus uncommitted and untracked changes. JSON is written to stdout and
@@ -283,9 +305,7 @@ These caps protect memory, prompts, and run artifacts rather than expressing a
 provider's context-window limit.
 
 Invalid or negative resource overrides are usage errors instead of silently
-falling back to another value. Resolved limits are recorded in run metadata and
-restored by replay; older runs receive the current safe defaults for fields
-that their metadata predates.
+falling back to another value. Resolved limits are recorded in run metadata.
 
 ## Exit and error contract
 
@@ -315,9 +335,8 @@ Every non-empty review creates a local run under `$XDG_DATA_HOME/roast`, or
 argv, exact prompts and reviewed input, successful raw provider response JSON,
 normalized usage, results, a Git snapshot, and a deterministic
 `bundle.tar.zst`. Provider requests, HTTP headers, and credentials are not
-recorded. `roast replay` restores the snapshot and verifies the input digest
-before making model calls; it reads current API keys from your config or
-environment rather than recording those configuration values.
+recorded. The snapshot and digests make a run reproducible by external tooling
+without recording API keys or other credential values.
 
 Repository-navigation tools read that immutable snapshot during the run. For
 staged reviews they read the captured index; other reviews read the captured
@@ -330,7 +349,7 @@ and SHA-256 digest. Roast verifies both new and reused bundles before accepting
 them and refuses symlinked or other non-regular run artifacts.
 
 When `upload.enabled` is true, Roast makes a best-effort upload after each
-completed review or replay. Direct-S3 objects use the content-addressed key
+completed review. Direct-S3 objects use the content-addressed key
 `<prefix>/sha256/<bundle-digest>.tar.zst`; the broker assigns a unique key and
 binds its grant to the bundle's size and SHA-256. Upload failures never change the review result and remain pending
 for `roast runs sync`; `roast runs status` reports local upload state. Runs

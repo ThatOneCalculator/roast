@@ -28,6 +28,7 @@ import (
 	"github.com/bluesky-social/roast/internal/runupload"
 	"github.com/bluesky-social/roast/internal/scope"
 	"github.com/bluesky-social/roast/internal/snapshot"
+	"github.com/bluesky-social/roast/internal/updatecheck"
 	"github.com/bluesky-social/roast/internal/verify"
 )
 
@@ -236,6 +237,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		if format != "text" && format != "json" {
 			return &usageError{msg: fmt.Sprintf("invalid --error-format %q (text|json)", format)}
 		}
+		startUpdateCheck(cmd.Context(), cmd.Name(), format, stderr)
 		return nil
 	}
 	root.SetFlagErrorFunc(flagUsageError)
@@ -256,10 +258,37 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	addReviewFlags(reviewCmd, &subFlags)
 	root.AddCommand(reviewCmd)
 	root.AddCommand(newRunsCommand(stdout, stderr))
-	root.AddCommand(newReplayCommand(stdout, stderr))
 	root.AddCommand(newGateCommand(stdout))
 	root.AddCommand(newConfigCommand(stdout))
+	root.AddCommand(newSkillCommand(stdout))
+	root.AddCommand(newDoctorCommand(stdout))
 	return root
+}
+
+func startUpdateCheck(ctx context.Context, command, errorFormat string, stderr io.Writer) {
+	if updateCheckDisabled() || command == "doctor" {
+		return
+	}
+	checker, err := updatecheck.Default()
+	if err != nil {
+		return
+	}
+	cached, err := checker.Cached(buildinfo.Version)
+	if err == nil && cached.UpdateAvailable() && errorFormat != "json" {
+		fmt.Fprintf(stderr, "roast: %s is available (running %s); update with Homebrew or your installation method\n", cached.Latest, buildinfo.Version)
+	}
+	if err != nil || checker.NeedsRefresh(cached) {
+		go func() {
+			refreshContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = checker.Check(refreshContext, buildinfo.Version, true)
+		}()
+	}
+}
+
+func updateCheckDisabled() bool {
+	value := strings.TrimSpace(os.Getenv("ROAST_NO_UPDATE_CHECK"))
+	return value == "1" || strings.EqualFold(value, "true")
 }
 
 func noArgs(cmd *cobra.Command, args []string) error {
@@ -317,25 +346,10 @@ func runReview(cmd *cobra.Command, f *reviewFlags, stdout, stderr io.Writer) err
 	if err := maybeProvision(cmd, f.configPath, stdout); err != nil {
 		return err
 	}
-	return runReviewWithOptions(cmd.Context(), cmd.Flags().Changed, f, stdout, stderr, reviewRunOptions{})
+	return runReviewCommand(cmd.Context(), cmd.Flags().Changed, f, stdout, stderr)
 }
 
-type reviewRunOptions struct {
-	repo              string
-	recordRepo        string
-	replayOf          string
-	roles             map[string]config.ResolvedRole
-	exactExcludes     []string
-	finderSystem      string
-	finderUser        string
-	verifierSystem    string
-	expectedInputKind string
-	expectedInput     string
-	ceilingsResolved  bool
-	argv              []string
-}
-
-func runReviewWithOptions(ctx context.Context, changed func(string) bool, f *reviewFlags, stdout, stderr io.Writer, opt reviewRunOptions) error {
+func runReviewCommand(ctx context.Context, changed func(string) bool, f *reviewFlags, stdout, stderr io.Writer) error {
 	if f.staged && f.uncommittedOnly {
 		return &usageError{msg: "--staged and --uncommitted-only cannot be combined"}
 	}
@@ -401,20 +415,13 @@ func runReviewWithOptions(ctx context.Context, changed func(string) bool, f *rev
 	}
 	finderRole = applyRoleFlags(changed, "finder", finderRole, f.finder)
 	verifierRole = applyRoleFlags(changed, "verifier", verifierRole, f.verifier)
-	if opt.roles != nil {
-		finderRole = opt.roles["finder"]
-		verifierRole = opt.roles["verifier"]
-	}
 	authorModel := f.authorModel
 	if !changed("author-model") {
 		authorModel = config.AuthorModel()
 	}
-	flip := config.FlipResult{Role: finderRole}
-	if opt.replayOf == "" {
-		flip, err = cfg.ResolveFinderFlip(finderRole, authorModel)
-		if err != nil {
-			return &usageError{msg: err.Error()}
-		}
+	flip, err := cfg.ResolveFinderFlip(finderRole, authorModel)
+	if err != nil {
+		return &usageError{msg: err.Error()}
 	}
 	if flip.Note != "" {
 		logf(stderr, "%s", flip.Note)
@@ -433,21 +440,11 @@ func runReviewWithOptions(ctx context.Context, changed func(string) bool, f *rev
 		}
 	}
 
-	repo := opt.repo
-	if repo == "" {
-		repo, err = scope.GitRoot(".")
-		if err != nil {
-			return &usageError{msg: err.Error()}
-		}
-	}
-	recordRepo := repo
-	if opt.recordRepo != "" {
-		recordRepo = opt.recordRepo
+	repo, err := scope.GitRoot(".")
+	if err != nil {
+		return &usageError{msg: err.Error()}
 	}
 	excludes := append(append([]string{}, cfg.Review.Excludes...), f.excludes...)
-	if opt.exactExcludes != nil {
-		excludes = append([]string(nil), opt.exactExcludes...)
-	}
 	build := scope.BuildOpts{
 		Base:            f.base,
 		UncommittedOnly: f.uncommittedOnly,
@@ -482,13 +479,6 @@ func runReviewWithOptions(ctx context.Context, changed func(string) bool, f *rev
 	if survey {
 		inputKind, reviewedInput = "manifest", sc.Manifest
 	}
-	if opt.expectedInputKind != "" && inputKind != opt.expectedInputKind {
-		return fmt.Errorf("replay input kind changed: got %s, want %s", inputKind, opt.expectedInputKind)
-	}
-	if opt.expectedInput != "" && record.Digest(reviewedInput) != opt.expectedInput {
-		return fmt.Errorf("replay input digest changed: restored tree does not reproduce the recorded %s", inputKind)
-	}
-
 	runID := record.NewRunID()
 	snapshotMeta, snapshotCaveats := captureSnapshot(repo, runID, sc, tree)
 	snapshotDurable := false
@@ -530,28 +520,20 @@ func runReviewWithOptions(ctx context.Context, changed func(string) bool, f *rev
 	if err != nil {
 		return &usageError{msg: err.Error()}
 	}
-	system := opt.finderSystem
-	if system == "" {
-		finderPrompt := cfg.Prompts.FinderCode
-		if mode == "prose" {
-			finderPrompt = cfg.Prompts.FinderProse
-		}
-		system, err = prompts.Finder(mode, f.scope, f.quick, langs, finderPrompt)
-		if err != nil {
-			return err
-		}
+	finderPrompt := cfg.Prompts.FinderCode
+	if mode == "prose" {
+		finderPrompt = cfg.Prompts.FinderProse
 	}
-	verifierSystem := opt.verifierSystem
-	if verifierSystem == "" {
-		verifierSystem, err = prompts.Verifier(cfg.Prompts.Verifier)
-		if err != nil {
-			return err
-		}
+	system, err := prompts.Finder(mode, f.scope, f.quick, langs, finderPrompt)
+	if err != nil {
+		return err
 	}
-	user := opt.finderUser
-	if user != "" {
-		// A replay uses the exact recorded user prompt.
-	} else if survey {
+	verifierSystem, err := prompts.Verifier(cfg.Prompts.Verifier)
+	if err != nil {
+		return err
+	}
+	var user string
+	if survey {
 		user = prompts.FinderUser(prompts.FinderUserVars{Task: f.task, Survey: true, Manifest: sc.Manifest})
 	} else {
 		user = prompts.FinderUser(prompts.FinderUserVars{
@@ -568,9 +550,6 @@ func runReviewWithOptions(ctx context.Context, changed func(string) bool, f *rev
 	maxVerified, err := resolveIntCeiling(changed, "max-verified", f.maxVerified, "ROAST_MAX_VERIFIED", defaultMaxVerified)
 	if err != nil {
 		return &usageError{msg: err.Error()}
-	}
-	if opt.ceilingsResolved {
-		maxTokensTotal, maxVerified = f.maxTokensTotal, f.maxVerified
 	}
 	requestTimeout := f.requestTimeout
 	if !changed("request-timeout") {
@@ -659,13 +638,9 @@ func runReviewWithOptions(ctx context.Context, changed func(string) bool, f *rev
 		scopeHeadOID = snapshotMeta.Head
 	}
 	envValues, envNames := record.CaptureEnv(cfg.CredentialEnvNames()...)
-	argv := opt.argv
-	if argv == nil {
-		argv = os.Args[1:]
-	}
 	meta := record.Meta{
-		RunID: runID, TS: time.Now().UTC().Format(time.RFC3339Nano), Repo: recordRepo,
-		ReplayOf: opt.replayOf, Argv: append([]string(nil), argv...),
+		RunID: runID, TS: time.Now().UTC().Format(time.RFC3339Nano), Repo: repo,
+		Argv:  append([]string(nil), os.Args[1:]...),
 		Roast: record.BuildMeta{Version: buildinfo.Version, Commit: buildinfo.Commit},
 		Scope: record.ScopeMeta{
 			Kind: f.scope, Base: sc.Base, UncommittedOnly: f.uncommittedOnly,
@@ -777,11 +752,11 @@ func runReviewWithOptions(ctx context.Context, changed func(string) bool, f *rev
 	if spent, limit := ledger.Committed(); limit > 0 {
 		budgets["ledger_committed_tokens"] = spent
 	}
-	report.Prior = priorNotes(recordRepo, result)
+	report.Prior = priorNotes(repo, result)
 	writeReport(stdout, stderr, f, report)
 	meta.Usage = usageMeta(usage)
 	meta.Budgets = budgets
-	finalErr := finalizeRunArtifacts(meta, report, recordRepo)
+	finalErr := finalizeRunArtifacts(meta, report, repo)
 	if finalErr == nil {
 		runupload.MaybeAutoUpload(cfg, record.DefaultDir(), runID)
 		if reportPath, pathErr := record.ReportPath(runID); pathErr == nil {

@@ -138,6 +138,24 @@ func TestHelpNeedsNoConfiguration(t *testing.T) {
 	}
 }
 
+func TestPublicCommandSurface(t *testing.T) {
+	root := newRootCommand(io.Discard, io.Discard)
+	commands := make(map[string]bool)
+	for _, command := range root.Commands() {
+		commands[command.Name()] = true
+	}
+	for _, name := range []string{"config", "doctor", "gate", "review", "runs", "skill"} {
+		if !commands[name] {
+			t.Errorf("missing public command %q", name)
+		}
+	}
+	for _, name := range []string{"eval", "install", "internal-update-helper", "login", "replay"} {
+		if commands[name] {
+			t.Errorf("unexpected command %q", name)
+		}
+	}
+}
+
 func TestBareCommandOutsideGitIsUsageError(t *testing.T) {
 	old, err := os.Getwd()
 	if err != nil {
@@ -428,39 +446,15 @@ upload:
 	if statusErr != nil || statusCode != ExitClean || !strings.Contains(statusOut.String(), "uploaded") {
 		t.Fatalf("upload status code=%d err=%v output=%s", statusCode, statusErr, statusOut.String())
 	}
-	stdout.Reset()
-	stderr.Reset()
-	code, runErr = ExecuteContext(t.Context(), []string{
-		"replay", original.RunID, "--config", configPath, "--format", "json",
-	}, &stdout, &stderr)
-	if runErr != nil || code != ExitFindings {
-		t.Fatalf("replay code=%d err=%v stdout=%s stderr=%s", code, runErr, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), `"status":"confirmed"`) || !strings.Contains(stdout.String(), `"file":"bad.go"`) {
-		t.Fatalf("unexpected replay report: %s", stdout.String())
-	}
-	var replayed struct {
-		RunID string `json:"run_id"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &replayed); err != nil || replayed.RunID == "" {
-		t.Fatalf("decode replay run id: %v: %s", err, stdout.String())
-	}
-	replayMeta, _, err := record.ReadMeta(replayed.RunID)
-	if err != nil {
-		t.Fatalf("read replay metadata: %v", err)
-	}
-	if replayMeta.Budgets["request_timeout"] != "0s" || replayMeta.Budgets["max_attempts"] != float64(1) {
-		t.Fatalf("replay budgets = %#v", replayMeta.Budgets)
-	}
 	mu.Lock()
 	defer mu.Unlock()
-	if strings.Join(models, ",") != "finder-test,verifier-test,finder-test,verifier-test" {
+	if strings.Join(models, ",") != "finder-test,verifier-test" {
 		t.Fatalf("models called = %v", models)
 	}
 	uploadMu.Lock()
 	defer uploadMu.Unlock()
-	if len(uploadPaths) != 2 || uploadPaths[0] == uploadPaths[1] {
-		t.Fatalf("automatic upload paths = %v, want one content-addressed object per completed review/replay", uploadPaths)
+	if len(uploadPaths) != 1 {
+		t.Fatalf("automatic upload paths = %v, want one object per completed review", uploadPaths)
 	}
 }
 
