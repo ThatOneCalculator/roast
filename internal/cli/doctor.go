@@ -220,7 +220,8 @@ func doctorEndpointCheck(ctx context.Context, client *http.Client, name string, 
 }
 
 func doctorLocalChecks(ctx context.Context) []doctorResult {
-	results := append(doctorGitChecks(), doctorSkillCheck())
+	results := doctorGitChecks()
+	results = append(results, doctorSkillChecks()...)
 	if updateCheckDisabled() {
 		return append(results, doctorResult{"release", doctorWarn, "disabled by ROAST_NO_UPDATE_CHECK"})
 	}
@@ -259,23 +260,29 @@ func doctorGitChecks() []doctorResult {
 	return append(results, doctorResult{"git-gate", doctorPass, status.Summary()})
 }
 
-func doctorSkillCheck() doctorResult {
-	target, err := skill.Target("")
+func doctorSkillChecks() []doctorResult {
+	targets, err := skill.InstallationTargets("")
 	if err != nil {
-		return doctorResult{"agent-skill", doctorWarn, err.Error()}
+		return []doctorResult{{"agent-skills", doctorWarn, err.Error()}}
 	}
-	status, err := skill.Inspect(target)
-	if err != nil {
-		return doctorResult{"agent-skill", doctorWarn, err.Error()}
+	results := make([]doctorResult, 0, len(targets))
+	for _, target := range targets {
+		name := target.Harness + "-skill"
+		status, inspectErr := skill.Inspect(target.Path)
+		if inspectErr != nil {
+			results = append(results, doctorResult{name, doctorWarn, inspectErr.Error()})
+			continue
+		}
+		switch status.State {
+		case skill.NotInstalled:
+			results = append(results, doctorResult{name, doctorWarn, "not installed; run `roast skill install`"})
+		case skill.Stale:
+			results = append(results, doctorResult{name, doctorWarn, "stale; run `roast skill install --force`"})
+		case skill.Symlink:
+			results = append(results, doctorResult{name, doctorPass, target.Path + " (development symlink)"})
+		default:
+			results = append(results, doctorResult{name, doctorPass, target.Path})
+		}
 	}
-	switch status.State {
-	case skill.NotInstalled:
-		return doctorResult{"agent-skill", doctorWarn, "not installed; run `roast skill install`"}
-	case skill.Stale:
-		return doctorResult{"agent-skill", doctorWarn, "stale; run `roast skill install --force`"}
-	case skill.Symlink:
-		return doctorResult{"agent-skill", doctorPass, target + " (development symlink)"}
-	default:
-		return doctorResult{"agent-skill", doctorPass, target}
-	}
+	return results
 }

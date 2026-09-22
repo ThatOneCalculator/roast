@@ -149,6 +149,10 @@ func ToMarkdown(r Report, showDropped bool) string {
 
 	if len(res.Findings) == 0 {
 		switch {
+		case res.Assessment == review.AssessmentNoDiff:
+			lines = append(lines, "## Nothing to review in this scope — no review ran")
+			lines = append(lines, "")
+			lines = append(lines, "No model was called, so this is NOT a clean review. Already committed? Try `--base <ref>`; use `--staged` before committing or `--scope repo` for a repository survey.")
 		// Cutoff first: an incomplete cutoff carries BOTH markers and must
 		// name the specific stop reason, not generic budget exhaustion.
 		case res.StopReason == "deadline" || res.StopReason == "token_budget":

@@ -70,21 +70,23 @@ func TestInspectTreatsTargetSymlinkAsDevelopmentInstall(t *testing.T) {
 	}
 }
 
-func TestInstallationTargetsIncludeAgentsAndDetectedClaude(t *testing.T) {
+func TestInstallationTargetsIncludeDetectedHarnesses(t *testing.T) {
 	home := filepath.Join(string(filepath.Separator), "home", "alice")
-	targets := installationTargets(home, filepath.Join(home, ".claude"), true)
+	polytokenRoot := filepath.Join(home, ".config", "polytoken")
+	targets := installationTargets(home, filepath.Join(home, ".claude"), true, polytokenRoot, true)
 	want := []InstallationTarget{
 		{Harness: "agents", Parent: filepath.Join(home, ".agents", "skills"), Path: filepath.Join(home, ".agents", "skills", "roast")},
 		{Harness: "claude", Parent: filepath.Join(home, ".claude", "skills"), Path: filepath.Join(home, ".claude", "skills", "roast")},
+		{Harness: "polytoken", Parent: filepath.Join(polytokenRoot, "skills"), Path: filepath.Join(polytokenRoot, "skills", "roast")},
 	}
 	if !reflect.DeepEqual(targets, want) {
 		t.Fatalf("installationTargets() = %#v, want %#v", targets, want)
 	}
 }
 
-func TestInstallationTargetsSkipUndetectedClaude(t *testing.T) {
+func TestInstallationTargetsSkipUndetectedHarnesses(t *testing.T) {
 	home := filepath.Join(string(filepath.Separator), "home", "alice")
-	targets := installationTargets(home, filepath.Join(home, ".claude"), false)
+	targets := installationTargets(home, filepath.Join(home, ".claude"), false, filepath.Join(home, ".config", "polytoken"), false)
 	if len(targets) != 1 || targets[0].Harness != "agents" {
 		t.Fatalf("installationTargets() = %#v", targets)
 	}

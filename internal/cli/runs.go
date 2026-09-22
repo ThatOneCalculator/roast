@@ -65,7 +65,7 @@ func newRunsCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().BoolVar(&rawJSON, "json", false, "emit raw JSONL records")
 	cmd.AddCommand(
 		newRunsShowCommand(stdout), newRunsCheckoutCommand(stdout, stderr),
-		newRunsPruneCommand(stdout, stderr), newRunsLabelCommand(stdout, stderr),
+		newRunsPruneCommand(stdout, stderr),
 		newRunsSyncCommand(stdout), newRunsStatusCommand(stdout),
 	)
 	return cmd

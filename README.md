@@ -53,8 +53,10 @@ roast skill status
 
 Roast always installs to the shared `~/.agents/skills/roast` location and also
 installs to `$CLAUDE_CONFIG_DIR/skills/roast` (or `~/.claude/skills/roast`) when
-Claude Code is detected. `roast skill status` reports every detected target.
-Use `--dir` to operate on only one explicit parent skills directory.
+Claude Code is detected, and to `$XDG_CONFIG_HOME/polytoken/skills/roast` (or
+`~/.config/polytoken/skills/roast`) when Polytoken is detected. `roast skill
+status` reports every detected target. Use `--dir` to operate on only one
+explicit parent skills directory.
 
 ## Configure
 

@@ -166,6 +166,15 @@ func TestPublicCommandSurface(t *testing.T) {
 			t.Errorf("unexpected command %q", name)
 		}
 	}
+	runs, _, err := root.Find([]string{"runs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range runs.Commands() {
+		if command.Name() == "label" {
+			t.Error("eval adjudication command runs label must not ship in the main binary")
+		}
+	}
 }
 
 func TestBareCommandOutsideGitShowsHelp(t *testing.T) {

@@ -65,10 +65,9 @@ func Target(parent string) (string, error) {
 	return filepath.Join(parent, "roast"), nil
 }
 
-// InstallationTargets returns the explicit --dir target, or the shared Agent
-// Skills location plus Claude's location when Claude is detected. The shared
-// location is always included because it is the portable Agent Skills target
-// and preserves Roast's existing default.
+// InstallationTargets returns the explicit --dir target, or every detected
+// harness skill location. The shared Agent Skills location is always included
+// because it is the portable target used by Codex and other compatible agents.
 func InstallationTargets(parent string) ([]InstallationTarget, error) {
 	if parent != "" {
 		path, err := Target(parent)
@@ -87,13 +86,23 @@ func InstallationTargets(parent string) ([]InstallationTarget, error) {
 		_, claudeErr := exec.LookPath("claude")
 		claudePresent = claudeErr == nil
 	}
-	return installationTargets(home, claudeRoot, claudePresent), nil
+	configRoot := configuredRoot(home, os.Getenv("XDG_CONFIG_HOME"), ".config")
+	polytokenRoot := filepath.Join(configRoot, "polytoken")
+	polytokenPresent := directoryExists(polytokenRoot)
+	if !polytokenPresent {
+		_, polytokenErr := exec.LookPath("polytoken")
+		polytokenPresent = polytokenErr == nil
+	}
+	return installationTargets(home, claudeRoot, claudePresent, polytokenRoot, polytokenPresent), nil
 }
 
-func installationTargets(home, claudeRoot string, claudePresent bool) []InstallationTarget {
+func installationTargets(home, claudeRoot string, claudePresent bool, polytokenRoot string, polytokenPresent bool) []InstallationTarget {
 	parents := []InstallationTarget{{Harness: "agents", Parent: filepath.Join(home, ".agents", "skills")}}
 	if claudePresent {
 		parents = append(parents, InstallationTarget{Harness: "claude", Parent: filepath.Join(claudeRoot, "skills")})
+	}
+	if polytokenPresent {
+		parents = append(parents, InstallationTarget{Harness: "polytoken", Parent: filepath.Join(polytokenRoot, "skills")})
 	}
 	seen := make(map[string]bool, len(parents))
 	out := make([]InstallationTarget, 0, len(parents))

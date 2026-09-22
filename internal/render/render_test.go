@@ -41,6 +41,26 @@ func TestToMarkdown_NoFindings(t *testing.T) {
 	}
 }
 
+func TestToMarkdown_NoDiffSaysNoReviewRan(t *testing.T) {
+	r := Report{
+		Result: &review.Result{
+			Findings:   []review.Finding{},
+			Dropped:    []review.Finding{},
+			Assessment: review.AssessmentNoDiff,
+			Notes:      []string{},
+		},
+		Mode:          "code",
+		FilesReviewed: []string{},
+	}
+	md := ToMarkdown(r, false)
+	if !strings.Contains(md, "no review ran") || !strings.Contains(md, "NOT a clean review") {
+		t.Fatalf("NO_DIFF must be unmistakable, got:\n%s", md)
+	}
+	if strings.Contains(md, "Roast complete") {
+		t.Fatalf("NO_DIFF must not render as a completed review, got:\n%s", md)
+	}
+}
+
 // TestToMarkdown_IncompleteNoSubmission verifies a budget-exhausted
 // interactive run with zero findings renders as explicitly incomplete, not
 // as a clean "no findings" review — the two must not read identically since
