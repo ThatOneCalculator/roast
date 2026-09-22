@@ -5,7 +5,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,10 +20,41 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
+		if err := healthcheck(); err != nil {
+			slog.Error("roast broker healthcheck failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("roast broker stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func healthcheck() error {
+	address := os.Getenv("ROAST_BROKER_LISTEN_ADDRESS")
+	if address == "" {
+		address = ":8080"
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("parse ROAST_BROKER_LISTEN_ADDRESS: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://" + net.JoinHostPort(host, port) + "/healthz")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health endpoint returned %s", resp.Status)
+	}
+	return nil
 }
 
 func run() error {
