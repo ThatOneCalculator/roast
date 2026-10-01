@@ -43,6 +43,35 @@ then run `roast-preview`. It reads the normal Roast configuration but can live
 beside an installed `roast`. To exercise a pre-commit gate with the preview
 binary, set `ROAST_BIN=/absolute/path/to/roast-preview` for the Git operation.
 
+## Stable releases and Homebrew
+
+Release Please maintains a release pull request on `main`. Merging that pull
+request creates the stable tag and release, then tests and builds the release
+archives with GoReleaser. GoReleaser updates `Casks/roast.rb` on `main` in
+`bluesky-social/homebrew-tap` with this repository's asset URLs and checksums.
+Existing `bluesky-social/tap` installations keep the same package name and
+upgrade with `brew upgrade --cask roast`.
+
+The release workflow requires `TAP_GITHUB_TOKEN`, with contents write access to
+the tap. It checks access before building a stable release. The archive
+repository must not have this credential or publish this cask. Preview releases
+never update the tap.
+
+Validate packaging locally with GoReleaser v2.18.2:
+
+```sh
+goreleaser check
+GORELEASER_CURRENT_TAG=v1.1.0 goreleaser release --snapshot --clean
+```
+
+Snapshot builds generate archives, checksums, and `dist/homebrew/Casks/roast.rb`
+without publishing. Before a stable release, check its setup caveats and test
+the generated cask's download strategy. Private assets use an authenticated
+`gh` fallback; public assets download normally without requiring `gh`.
+
+Homebrew upgrades replace a manually linked preview at Homebrew's `roast`
+path. Run `roast --version` after upgrading to confirm which binary is active.
+
 ## Security
 
 Do not report vulnerabilities in a public issue. Follow [SECURITY.md](SECURITY.md)

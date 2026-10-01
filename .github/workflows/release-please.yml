@@ -57,6 +57,22 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Fail early on a stable release without blocking routine release-PR
+      # updates. GITHUB_TOKEN cannot write to another repository.
+      - name: Check tap publishing credential
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "TAP_GITHUB_TOKEN must be available to this repository"
+            exit 1
+          fi
+          if [[ "$(gh api repos/bluesky-social/homebrew-tap --jq '.permissions.push')" != true ]]; then
+            echo "TAP_GITHUB_TOKEN must have write access to bluesky-social/homebrew-tap"
+            exit 1
+          fi
+
       - name: Checkout release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,3 +96,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

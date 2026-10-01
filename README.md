@@ -10,7 +10,7 @@ finder and verifier may use different endpoints and wire protocols.
 
 ## Current status
 
-Roast supports local review, repository survey, durable run records, labeling,
+Roast supports local review, repository survey, durable run records,
 an optional Git gate, and optional S3-compatible run uploads. It has no
 telemetry or external retrieval tools. In interactive mode, models can only
 navigate the local checkout with bounded file, grep, and listing tools.
@@ -24,6 +24,15 @@ go build ./cmd/roast
 ```
 
 ## Install
+
+For macOS with Homebrew:
+
+```sh
+brew install --cask bluesky-social/tap/roast
+```
+
+Existing installations from `bluesky-social/tap` upgrade in place with
+`brew upgrade --cask roast`; no re-tap or package rename is needed.
 
 Tagged releases provide `roast` archives for macOS, Linux, and Windows on
 amd64 and arm64. Download the archive for your platform from

@@ -25,7 +25,8 @@ builds:
       - -X github.com/bluesky-social/roast/internal/buildinfo.Date={{ .Date }}
 
 archives:
-  - ids: [roast]
+  - id: roast
+    ids: [roast]
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
@@ -52,3 +53,76 @@ changelog:
 release:
   # Release Please creates the release before GoReleaser attaches binaries.
   mode: keep-existing
+
+# Keep the existing cask identity so current installations upgrade in place.
+homebrew_casks:
+  - name: roast
+    ids: [roast]
+    binaries: [roast]
+    directory: Casks
+    description: "Adversarial cross-model code review CLI"
+    homepage: https://github.com/bluesky-social/roast
+    caveats: |
+      Configure inference following the README, or use a trusted configuration URL:
+        roast config init --from <trusted-configuration-url>
+      Then check your setup and install the bundled Agent Skill:
+        roast doctor
+        roast skill install
+      The first interactive review offers to enable the pre-commit gate.
+    repository:
+      owner: bluesky-social
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    url:
+      template: "https://github.com/bluesky-social/roast/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+      using: GhReleaseStrategy
+    custom_block: |
+      class GhReleaseStrategy < CurlDownloadStrategy
+        def initialize(url, name, version, **meta)
+          super
+          unless %r{\Ahttps://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/]+)\z} =~ @url
+            raise CurlDownloadStrategyError, "unexpected release URL: #{@url}"
+          end
+          @gh_owner, @gh_repo, @gh_tag, @gh_asset =
+            Regexp.last_match(1), Regexp.last_match(2), Regexp.last_match(3), Regexp.last_match(4)
+        end
+
+        private
+
+        def _fetch(url:, resolved_url:, timeout:)
+          # Public releases use Homebrew's normal download without requiring gh.
+          begin
+            return super
+          rescue ErrorDuringExecution
+            # Private releases return 404 anonymously; use the user's gh login.
+          end
+
+          candidates = (ENV["HOMEBREW_PATH"] || "").split(":").map { |d| File.join(d, "gh") }
+          candidates += ["#{HOMEBREW_PREFIX}/bin/gh", "/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
+          gh = candidates.find { |p| File.executable?(p) } || which("gh")&.to_s
+          unless gh
+            raise CurlDownloadStrategyError,
+                  "gh is required for private release downloads; run: brew install gh && gh auth login"
+          end
+          unless SystemCommand.quiet_system(gh, "auth", "status", "--hostname", "github.com")
+            raise CurlDownloadStrategyError,
+                  "gh is not authenticated; run: gh auth login"
+          end
+          ok = system(gh, "release", "download", @gh_tag,
+                      "--repo", "#{@gh_owner}/#{@gh_repo}",
+                      "--pattern", @gh_asset,
+                      "--output", temporary_path.to_s, "--clobber")
+          return if ok && temporary_path.exist? && !temporary_path.empty?
+
+          raise CurlDownloadStrategyError,
+                "gh failed to download #{@gh_asset} from #{@gh_owner}/#{@gh_repo}@#{@gh_tag}"
+        end
+      end
+
+      # GoReleaser's hooks still emit the deprecated postflight stanza.
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "."], chdir: "."
+        end
+      end
