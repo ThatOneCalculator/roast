@@ -44,6 +44,19 @@ type legacyConfig struct {
 	Roles   map[string]legacyRole `yaml:"roles"`
 	Review  Review                `yaml:"review"`
 	Prompts Prompts               `yaml:"prompts"`
+	// Recognize the retired archive schema without carrying these values into
+	// public configuration or restoring the associated integrations.
+	Gate      legacyGate      `yaml:"gate"`
+	Sourcebot legacySourcebot `yaml:"sourcebot"`
+}
+
+type legacyGate struct {
+	AutoInstall *bool `yaml:"auto_install"`
+}
+
+type legacySourcebot struct {
+	URL   string `yaml:"url"`
+	Token string `yaml:"token"`
 }
 
 type legacyGateway struct {
@@ -82,6 +95,13 @@ func unversionedShape(data []byte) (configShape, error) {
 			return shapeDraftProfiles, nil
 		}
 		return shapeCurrent, nil
+	}
+	// Archive installs could contain only a gateway credential and retired
+	// settings, with role details supplied by their old embedded defaults.
+	for _, key := range []string{"gateway", "gate", "sourcebot"} {
+		if mappingValue(root, key) != nil {
+			return shapeLegacyRoles, nil
+		}
 	}
 	if roles := mappingValue(root, "roles"); roles != nil && nestedMappingHasAnyKey(roles,
 		"base_url", "api_key", "model", "api", "max_output_tokens", "author_flip",

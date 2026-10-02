@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,6 +63,15 @@ func TestS3CompatibleStoreUsesExplicitCredentialsAndContentAddressedKey(t *testi
 
 func TestPresignedStoreUsesBearerOnlyForControlPlane(t *testing.T) {
 	body := []byte("bundle bytes")
+	bundlePath := filepath.Join(t.TempDir(), "bundle.tar.zst")
+	if err := os.WriteFile(bundlePath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := os.Open(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bundle.Close() })
 	var dataAuthorization string
 	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		dataAuthorization = r.Header.Get("Authorization")
@@ -97,9 +108,12 @@ func TestPresignedStoreUsesBearerOnlyForControlPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := store.Put(t.Context(), "run-1", bytes.NewReader(body), int64(len(body)), strings.Repeat("a", 64))
+	result, err := store.Put(t.Context(), "run-1", bundle, int64(len(body)), strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := bundle.Stat(); err != nil {
+		t.Fatalf("HTTP closed the caller-owned bundle file: %v", err)
 	}
 	if !complete || dataAuthorization != "" || result.Key != "runs/run-1/bundle.tar.zst" || result.VersionID != "v1" {
 		t.Fatalf("complete=%v data auth=%q result=%#v", complete, dataAuthorization, result)

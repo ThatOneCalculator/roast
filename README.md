@@ -33,6 +33,8 @@ brew install --cask bluesky-social/tap/roast
 
 Existing installations from `bluesky-social/tap` upgrade in place with
 `brew upgrade --cask roast`; no re-tap or package rename is needed.
+See [Upgrading from the original Roast](docs/upgrading.md) for configuration
+migration and optional cleanup of retired Claude integrations.
 
 Tagged releases provide `roast` archives for macOS, Linux, and Windows on
 amd64 and arm64. Download the archive for your platform from
@@ -178,6 +180,8 @@ upload:
 two legacy unversioned formats and migrates them in memory: inline
 role settings using `api`/`author_flip`, and named profiles using `base_url`.
 An explicit unsupported version or an unknown field is an error.
+The old inline-role format recognizes and discards its retired `gate` and
+`sourcebot` sections; they are not valid fields in version-1 configuration.
 
 Each profile names a model and the HTTP `endpoint` that serves it. `protocol`
 selects the Fantasy wire adapter (`chat`, `responses`, or `anthropic`). The

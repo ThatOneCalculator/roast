@@ -113,7 +113,10 @@ func (s *presignedStore) Put(ctx context.Context, runID string, body io.Reader, 
 	if err != nil {
 		return uploadResult{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, grant.Method, grant.UploadURL, body)
+	// Put accepts a borrowed Reader; the caller owns its lifetime. Without the
+	// wrapper, net/http takes ownership when body is also an io.ReadCloser
+	// (notably the run bundle's *os.File), breaking the caller's final Close.
+	req, err := http.NewRequestWithContext(ctx, grant.Method, grant.UploadURL, io.NopCloser(body))
 	if err != nil {
 		return uploadResult{}, fmt.Errorf("build presigned upload request: %w", err)
 	}

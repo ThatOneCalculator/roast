@@ -3,6 +3,10 @@ version: 2
 
 project_name: roast
 
+before:
+  hooks:
+    - bash scripts/licenses.sh
+
 builds:
   - id: roast
     binary: roast
@@ -38,6 +42,7 @@ archives:
       - LICENSE-MIT.txt
       - README.md
       - SECURITY.md
+      - THIRD_PARTY_LICENSES/*
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"

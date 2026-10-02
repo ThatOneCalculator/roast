@@ -99,5 +99,8 @@ jobs:
 
       - name: Check dependency licenses
         run: >-
-          go run github.com/google/go-licenses@v1.6.0 check ./...
+          go run github.com/google/go-licenses/v2@v2.0.1 check ./...
           --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0,Unlicense
+
+      - name: Generate release license notices for all targets
+        run: bash scripts/licenses.sh

@@ -95,12 +95,15 @@ func TestProvisionRejectsCrossOriginRedirect(t *testing.T) {
 }
 
 func TestProvisionInPlaceBacksUpLegacyConfig(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("configuration fetch must not send the legacy credential")
+		}
 		_, _ = w.Write([]byte(provisionTemplate))
 	}))
 	defer server.Close()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	legacy := []byte("gateway:\n  api_key: legacy-secret\nroles:\n  finder:\n    model: old\n    api: chat\n")
+	legacy := []byte("gateway:\n  api_key: legacy-secret\nroles:\n  finder:\n    model: old\n    api: chat\ngate:\n  auto_install: false\nsourcebot:\n  url: https://retired-search.example\n  token: discarded-retrieval-key\n")
 	if err := os.WriteFile(path, legacy, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +117,22 @@ func TestProvisionInPlaceBacksUpLegacyConfig(t *testing.T) {
 	needs, err := NeedsProvision(path)
 	if err != nil || needs {
 		t.Fatalf("installed config still needs provisioning: needs=%v err=%v", needs, err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"sourcebot", "auto_install", "discarded-retrieval-key", "retired-search.example"} {
+		if strings.Contains(string(raw), retired) {
+			t.Errorf("retired setting %q was copied into the provisioned config", retired)
+		}
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InferenceProfiles["finder"].APIKey != "legacy-secret" || cfg.Upload.Token != "legacy-secret" {
+		t.Fatal("legacy gateway credential was not imported into the opted-in template")
 	}
 }
 

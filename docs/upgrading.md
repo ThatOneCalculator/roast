@@ -1,0 +1,140 @@
+# Upgrading from the original Roast
+
+The review command, durable local runs, optional Git pre-commit gate, and
+automatic opt-in run uploads remain available. Configuration is now
+provider-neutral. Internal login, retrieval, telemetry, and the Claude
+PostToolUse findings hook are not part of the new application. Evaluation and
+replay belong in a separate binary, not the normal Roast install.
+
+## 1. Upgrade when your maintainer announces the cutover
+
+Do not use a preview as a signal that the production upgrade is ready.
+Once the maintainer has cut over the existing Homebrew cask:
+
+```sh
+brew update
+brew upgrade --cask roast
+roast --version
+```
+
+The tap and cask keep their existing names; no re-tap is needed. A Homebrew
+upgrade replaces a preview manually linked at Homebrew's `roast` executable
+path. Other installation methods should use the release artifacts or build
+instructions in the README. Nothing in this guide requires making a private
+repository public.
+
+## 2. Initialize configuration
+
+If your organization provides a trusted configuration URL, run:
+
+```sh
+roast config init --from https://config.example/roast
+roast doctor
+```
+
+Use the URL supplied by your maintainer, not the illustrative URL above.
+An interactive first review also offers the configuration-URL prompt when the
+current config is missing or unversioned. Non-interactive runs do not prompt;
+initialize them explicitly. An explicit `--config` bypasses automatic enrollment.
+
+The configuration document must declare `version: 1` and contain no inline
+secrets. It may name credential environment variables. If a trusted template
+explicitly opts into `provisioning.import_legacy_credential: true`, Roast carries
+the old `gateway.api_key` into otherwise credential-free inference profiles and
+presigned-broker authentication locally. It never sends that credential to the
+configuration URL. A template which names credential environment variables does
+not have those sources replaced by the legacy key.
+
+The old config is found under `$XDG_CONFIG_HOME/roast/config.yaml`, or
+`~/.config/roast/config.yaml` when XDG is unset. The new default path uses the
+operating system's user-config directory:
+
+| Platform | New default path |
+| --- | --- |
+| macOS | `~/Library/Application Support/roast/config.yaml` |
+| Linux | `$XDG_CONFIG_HOME/roast/config.yaml`, or `~/.config/roast/config.yaml` |
+| Windows | `%AppData%\roast\config.yaml` |
+
+`roast doctor` shows the selected config path. In-place legacy replacement keeps
+a `.pre-v1` backup and writes the new file with owner-only permissions on Unix.
+When the destination differs, the old file is left untouched. Both the old file
+and any backup can contain credentials: protect them and never attach them to a
+public bug report. Provisioning refuses to overwrite an existing versioned
+destination. For a deliberate alternate destination, use `--output <new-path>`.
+
+Without a configuration URL, use the README's named-profile examples. Roast
+can load old inline-role configs in memory; the retired `gate` and `sourcebot`
+sections are recognized and discarded rather than restoring those features.
+That compatibility does not discover a replacement upload endpoint. Old
+`upload.enabled: true` alone never enables uploads to a new destination.
+
+## 3. Review changed configuration and environment settings
+
+| Old setting | New behavior |
+| --- | --- |
+| Inline role `model` / `api` / `author_flip` | Named `inference_profiles` with `model` / `protocol` / `endpoint`; roles select profiles and `author_routes` select complete alternative profiles. |
+| Global `ROAST_API_KEY` / `AIGW_API_KEY` | Not used as global overrides. Use profile `api_key_env`, a user-config `api_key`, or role-specific `ROAST_FINDER_API_KEY` / `ROAST_VERIFIER_API_KEY`. |
+| `gate.auto_install` / `ROAST_HOOK_INSTALL` | Retired. The first interactive review asks once per repository; a decline is recorded in local Git config. `ROAST_NO_HOOK=1` suppresses bootstrap, and `roast gate enable|status|disable` manages explicit enrollment. |
+| Old upload enrollment | Configure an S3-compatible destination with explicit credential environment variables, or a presigned broker with `token_env`/locally imported token. Uploads remain disabled unless the new config explicitly enables them. |
+
+For provider defaults, `OPENAI_API_KEY` / `OPENAI_BASE_URL` apply to `chat` and
+`responses`; `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` apply to `anthropic`.
+Role-specific settings override them. Remove obsolete environment exports when
+you have moved to explicit credential sources.
+
+## 4. Refresh the skill and check the gate
+
+```sh
+roast skill install
+roast skill status
+roast gate status
+```
+
+Run the gate command inside each repository you care about. Keep your native
+Git gate; it is separate from the retired Claude hook. Enable it explicitly with
+`roast gate enable`, or accept the one-time interactive prompt. A declined
+prompt does not prevent later explicit enrollment. Non-interactive invocation
+does not install a hook without consent.
+
+## 5. Optional cleanup of the retired Claude integration
+
+This is cleanup on an existing user's machine, not an integration shipped by
+the new binary. `roast skill install` deliberately does not edit Claude settings
+or delete previously installed hooks.
+
+If you previously used the original `roast install`:
+
+1. Locate your Claude config root, normally `~/.claude`, or the directory named
+   by `CLAUDE_CONFIG_DIR`. Make a separate, non-overwriting backup of its
+   `settings.json` before editing it.
+2. Under `hooks.PostToolUse`, remove only command entries which invoke the old
+   Roast-owned `hooks/roast/posttooluse-roast.sh`. Older installations may point
+   to a different location for that same script; inspect the command before
+   removing it. Preserve other commands in the same matcher and all unrelated
+   hook events. Do not remove the native Git pre-commit gate.
+3. Under `footerLinksRegexes`, remove the old Roast report-link entries: labels
+   `R-{alias}` and `roast {id}`, with `vscode://file/{path}` URLs and patterns
+   matching Roast's `runs/<run-id>/report.md` paths. Preserve unrelated entries.
+4. Once no settings reference it, the old Roast-owned script may be removed.
+   Remove only that script, not the Claude hooks directory. No bulk deletion or
+   automatic settings rewrite is required.
+
+If those entries or files do not exist, there is nothing to clean up. Restart
+Claude after editing settings and confirm `roast skill status` still reports
+the installed skill.
+
+## 6. Verify a review and, if enabled, uploads
+
+Run `roast doctor`, then review a small non-empty change. `doctor` sends a small
+inference probe to each configured role; a review sends the selected repository
+material to those endpoints. Confirm they are trusted before using private code.
+
+When the new config explicitly enables uploads, the completed run should upload
+automatically. `roast runs status` shows its state; `roast runs sync` retries
+pending uploads. Upload failures do not change the review's result or exit
+status. Do not use `--include-existing` unless you intend to upload older local
+run records as well.
+
+For issues, share the Roast version and redacted error text. Do not share config
+credentials or complete run bundles without checking their contents; bundles
+can include proprietary code, prompts, snapshots, and model responses.

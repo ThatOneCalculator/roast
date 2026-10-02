@@ -32,6 +32,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Generate runtime license notices
+        run: bash scripts/licenses.sh
+
       - name: Set preview metadata
         id: metadata
         shell: bash
@@ -75,6 +78,7 @@ jobs:
               -ldflags "-s -w -X github.com/bluesky-social/roast/internal/buildinfo.Version=${BUILD_VERSION} -X github.com/bluesky-social/roast/internal/buildinfo.Commit=${BUILD_COMMIT} -X github.com/bluesky-social/roast/internal/buildinfo.Date=${BUILD_DATE}" \
               -o "${binary}" ./cmd/roast
             cp LICENSE.txt LICENSE-APACHE.txt LICENSE-MIT.txt README.md SECURITY.md "${package}/"
+            cp -R THIRD_PARTY_LICENSES "${package}/"
             if [[ "${goos}" == windows ]]; then
               (cd "${package}" && zip -q -r "../../dist/${archive}.zip" .)
             else

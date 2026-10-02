@@ -1,4 +1,9 @@
 .git
 .github
 dist
+bin
+THIRD_PARTY_LICENSES
+roast
+roast.exe
+roast-broker
 *.tar.gz

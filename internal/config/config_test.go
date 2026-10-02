@@ -3,7 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 func writeConfig(t *testing.T, data string) string {
@@ -333,6 +336,11 @@ func TestLoadMigratesLegacyInlineRoles(t *testing.T) {
   api_key: shared-legacy-key
 upload:
   enabled: true
+gate:
+  auto_install: false
+sourcebot:
+  url: https://retired-search.example
+  token: discarded-retrieval-key
 roles:
   finder:
     model: gpt-finder
@@ -361,14 +369,54 @@ roles:
 	if route.Model != "claude-reviewer" || route.Protocol != "anthropic" || route.BaseURL != "https://legacy-gateway.example/v1" || route.APIKey != "shared-legacy-key" || route.MaxOutputTokens != 1234 {
 		t.Fatalf("migrated author route %q = %#v", routeName, route)
 	}
+	if cfg.Upload.Enabled {
+		t.Fatal("legacy upload enrollment must not enable a new upload destination")
+	}
+	raw, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"auto_install", "sourcebot", "retired-search.example", "discarded-retrieval-key"} {
+		if strings.Contains(string(raw), retired) {
+			t.Errorf("retired setting %q survived migration", retired)
+		}
+	}
+}
+
+func TestLoadRecognizesLegacyConfigWithoutExplicitRoles(t *testing.T) {
+	path := writeConfig(t, `gateway:
+  api_key: unused-legacy-key
+gate:
+  auto_install: false
+sourcebot:
+  url: https://retired-search.example
+  token: discarded-retrieval-key
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Version != CurrentVersion || cfg.Upload.Enabled {
+		t.Fatalf("unexpected migrated config: %#v", cfg)
+	}
+}
+
+func TestLoadLegacyConfigStillRejectsUnknownFields(t *testing.T) {
+	for _, suffix := range []string{"unknown: true\n", "gate:\n  auto_instal: false\n", "sourcebot:\n  tokne: invalid\n"} {
+		if _, err := Load(writeConfig(t, "gateway:\n  api_key: legacy-key\n"+suffix)); err == nil {
+			t.Fatalf("unknown legacy setting was accepted: %q", suffix)
+		}
+	}
 }
 
 func TestLoadEnforcesVersionedSchema(t *testing.T) {
 	for name, body := range map[string]string{
-		"future version":     "version: 2\n",
-		"zero version":       "version: 0\n",
-		"old field in v1":    "version: 1\ninference_profiles:\n  old:\n    base_url: https://example.test/v1\n",
-		"multiple documents": "version: 1\n---\nversion: 1\n",
+		"future version":       "version: 2\n",
+		"zero version":         "version: 0\n",
+		"old field in v1":      "version: 1\ninference_profiles:\n  old:\n    base_url: https://example.test/v1\n",
+		"retired gate in v1":   "version: 1\ngate:\n  auto_install: false\n",
+		"retired search in v1": "version: 1\nsourcebot:\n  url: https://retired-search.example\n",
+		"multiple documents":   "version: 1\n---\nversion: 1\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Load(writeConfig(t, body)); err == nil {

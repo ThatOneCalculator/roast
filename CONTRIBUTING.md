@@ -72,6 +72,36 @@ the generated cask's download strategy. Private assets use an authenticated
 Homebrew upgrades replace a manually linked preview at Homebrew's `roast`
 path. Run `roast --version` after upgrading to confirm which binary is active.
 
+## Dependency notices
+
+`bash scripts/licenses.sh` checks and collects runtime dependency licenses and
+notices for all six CGO-disabled CLI release targets, plus the broker. It uses
+pinned `go-licenses/v2` v2.0.1, generates per-target CSV inventories, and includes
+the Go runtime/standard-library license. Generated files live in the ignored
+`THIRD_PARTY_LICENSES/` directory, separate from Roast's own licenses. The script
+refuses to replace a directory it did not generate.
+
+GoReleaser runs this script before packaging, preview releases use the same
+bundle, and CI checks generation for every target. The broker Dockerfile
+generates notices for its Linux architecture and puts them, with Roast's own
+licenses, under `/usr/share/licenses/roast/` in the final image. When changing
+dependencies, inspect the generated inventories and any non-Go-code inspection
+warnings; automated classification is not a substitute for legal review.
+
+Prefer stable dependency releases. Two current exceptions were checked on
+October 2, 2026:
+
+- grpc's selected development pin is the fix identified by
+  [GO-2026-6443](https://pkg.go.dev/vuln/GO-2026-6443); the latest stable 1.84.0
+  still has that server-panic advisory. Roast does not call the affected server
+  functions, but retain the patched pin until a fixed stable release is available.
+- YAML v4 has no stable release yet. The selected release candidate is required
+  by upstream JSON-schema and Anthropic SDK code. Do not replace its module with
+  YAML v3: the major-version types/contracts are not interchangeable.
+
+Revisit these exceptions when upstream releases permit it, and rerun provider
+tests, module checks, vulnerability checks, and notice generation after changes.
+
 ## Security
 
 Do not report vulnerabilities in a public issue. Follow [SECURITY.md](SECURITY.md)

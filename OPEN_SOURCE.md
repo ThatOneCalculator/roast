@@ -1,6 +1,7 @@
 # Open-source migration journal
 
-Working checkpoint: October 1, 2026. This is the single temporary journal and
+Audit checkpoint: October 1, 2026; authorized fixes: October 2, 2026.
+This is the single temporary journal and
 checklist for the migration. The earlier `OPEN_SOURCE.md` is not present in
 either current checkout or its tracked history; this document reconstructs the
 decisions and records what this audit verified, not the original journal text.
@@ -9,11 +10,12 @@ Review and remove or condense it during the final publication preparation.
 ## Boundaries
 
 - Keep `roast` and `roast-archive` private until explicitly authorized otherwise.
-- Do not do the final squash/rebase, force-push, change visibility, or merge the
-  stable release PR in this phase.
-- Commit the Homebrew preparation in both repositories. This phase does not
-  push those commits, publish releases, or replace the installed preview.
-- Audit newly discovered gaps here; do not silently implement another phase.
+- Do not do the final squash/rebase, force-push, or change visibility.
+- The initial audit/preparation phase held commits locally and did not publish
+  a stable release or replace the installed preview.
+- October 2: fix audit items 1-5 as authorized. Eval remains intentionally
+  deferred. Subsequent authorization explicitly permits committing/pushing,
+  cutting a new stable release, and testing the Homebrew installation locally.
 
 ## Verified migration decisions
 
@@ -72,17 +74,18 @@ cleanup, not a lost public command.
 
 ### 1. Legacy configuration migration blocker
 
-- [ ] Accept and deliberately discard retired legacy config sections during
+- [x] Accept and deliberately discard retired legacy config sections during
   migration while retaining strict validation for current version-1 configs.
-- [ ] Test both ordinary config loading and configuration-URL provisioning
+- [x] Test both ordinary config loading and configuration-URL provisioning
   against representative archive configs, including `gate` and `sourcebot`.
 
-The archive schema accepts those sections. The current `legacyConfig` in
-`internal/config/migrate.go` omits them; both `decode` in `config.go` and
-`Provision` in `provision.go` use strict known-field decoding. A valid old
-config therefore fails before it can migrate.
+The original audit found that `legacyConfig` omitted the archive's `gate` and
+`sourcebot` sections, breaking strict loading and provisioning. It now recognizes
+those retired fields only in the legacy schema and discards them during
+migration. Unknown legacy keys and retired fields in version-1 configs still
+fail validation. Credential-only legacy configs are also recognized.
 
-Reproduced with an inline-role config containing dummy credentials and
+Previously reproduced with an inline-role config containing dummy credentials and
 `example.invalid` URLs, via `go run ./cmd/roast doctor --config <fixture> --json`:
 
 ```text
@@ -90,64 +93,93 @@ field gate not found in type config.legacyConfig
 field sourcebot not found in type config.legacyConfig
 ```
 
-This needs fixing before an existing-user upgrade. Do not restore retired
-retrieval functionality merely to recognize its old configuration keys.
+Regression tests cover loading, in-place provisioning/backups, discarded
+retrieval credentials, and preservation of the opted-in gateway credential.
+No retired retrieval functionality was restored.
 
 ### 2. Useful prompt regression tests were not migrated
 
-- [ ] Adapt the 22 archive `internal/prompts/prompts_test.go` tests covering
+- [x] Adapt the 22 archive `internal/prompts/prompts_test.go` tests covering
   mode/scope assembly, language-pack deduplication, quick behavior, overrides,
   verifier refutation, anti-anchoring, and insufficient-context safeguards.
   Keep obsolete retrieval and unsupported branch-scope expectations excluded.
 
-Current `internal/prompts` has no test files. The templates and configurable
-prompt paths exist; this is a missing regression suite, not missing prompts.
+All 22 adapted tests pass. Porting exposed a stale verifier instruction claiming
+`list_files` always reads the live working tree. The prompt and regression now
+defer to each tool's captured-corpus disclosure. No branch scope or retrieval
+expectations were restored.
 
 ### 3. Dependency notices and distribution review
 
-- [ ] Review dependency attribution/license obligations and generate/package
-  applicable notices for stable CLI archives, preview archives, and broker
-  images. Confirm coverage for all distributed targets.
+- [x] Generate/package applicable dependency licenses and notices for stable
+  CLI archives, preview archives, and broker images, using pinned
+  `go-licenses/v2` v2.0.1 and the release-target build graphs.
+- [ ] Final human/legal review of attribution and non-Go-code inspection
+  warnings, alongside the rest of the publication content review.
+- [x] Validate final local snapshot archives for all six targets and the broker
+  image: dependency notices, root Go license, CSV inventories, Windows-only
+  dependency attribution, and no eval/broker binary in CLI archives. Smoke-test
+  the preview copy/archive recipe for all six targets without publishing.
 
-CI currently checks an allowed-license list, but does not generate distribution
-notices. Stable/preview archives copy Roast's license files only; the broker's
-final Docker layer copies only its binary. `go-licenses check` and `save` are
-different operations; the [upstream documentation](https://github.com/google/go-licenses)
-describes `save` as producing redistributable license/source material. This is
-a packaging/legal-review gap, not a formal legal conclusion. The inspected report contained
-Apache-2.0, BSD-2-Clause, BSD-3-Clause, and MIT dependencies.
+`scripts/licenses.sh` generates the ignored `THIRD_PARTY_LICENSES` bundle with
+per-target inventories, dependency license/NOTICE files, and the Go license and
+patent grant. Stable archives, preview archives, and the broker's final Docker
+layer include it; CI exercises all six release targets. The generator refuses
+to replace unowned directories/symlinks and stages a complete result before
+replacing a previous generated bundle. Contributor docs describe the process.
+This is packaging work, not a formal legal compliance certification.
 
 ### 4. Existing-user migration guidance
 
-- [ ] Document targeted cleanup of old Roast-owned Claude PostToolUse settings,
+- [x] Document targeted cleanup of old Roast-owned Claude PostToolUse settings,
   footer links, and `<claude-root>/hooks/roast/posttooluse-roast.sh`, preserving
   unrelated settings and hooks. New `skill install` does not remove them.
-- [ ] Document retired `gate.auto_install` / `ROAST_HOOK_INSTALL` behavior and
+- [x] Document retired `gate.auto_install` / `ROAST_HOOK_INSTALL` behavior and
   old global `ROAST_API_KEY` / `AIGW_API_KEY` semantics versus explicit current
   profiles and role credential sources.
 - [ ] Run a complete upgrade rehearsal from an archive-style configuration and
   real Homebrew installation, including configuration-URL enrollment and
   uploads to the configured service, before authorizing user cutover.
 
+The public guide is `docs/upgrading.md`. No local Claude settings were inspected
+or changed. The earlier audit wording was too definite: stale entries can
+remain after upgrading; their presence on the operator's machine was not verified.
+
+- [x] Exercise the real CLI upgrade in isolated tests with local model/broker/
+  storage HTTP fixtures: both in-place and separate-directory provisioning,
+  legacy backups, finder/verifier review, durable bundles, automatic upload,
+  successful outbox state, and secret-free metadata.
+
+This test uncovered a presigned-upload ownership bug: HTTP closed the caller's
+bundle file, so Roast's later close failed and a successful upload stayed
+pending. The uploader now gives HTTP a non-owning reader wrapper. File-reader
+and end-to-end regression tests cover the fix. The installed executable and
+live tap have not been changed for this rehearsal.
+
 ### 5. Stable-dependency follow-up
 
-- [ ] Assess whether upstream requirements permit replacing the selected
+- [x] Assess whether upstream requirements permit replacing the selected
   `google.golang.org/grpc v1.85.0-dev.0.20260825072537-93e31b48545e` and
   `go.yaml.in/yaml/v4 v4.0.0-rc.6` with stable releases.
 
-`go mod why` confirms grpc enters through Fantasy's Anthropic SDK/Vertex
-support and YAML v4 through jsonschema/ordered-map. They are not dependencies
-added for Roast-owned cloud infrastructure. No dependency changes were made
-during this audit.
+Checked October 2: grpc's latest stable 1.84.0 has GO-2026-6443, a server-panic
+advisory whose fixed version is exactly the selected development pin. A trial
+downgrade added a package-level advisory (still no reachable vulnerable call),
+so it was reverted. Keep the patched pin until upstream ships a fixed stable.
+YAML v4's latest release is still rc.6, and upstream JSON-schema/Anthropic SDK
+code imports its v4 types. A v3 module substitution would not be a compatible
+cleanup. Runtime module files are unchanged; these two explicit exceptions
+are documented in CONTRIBUTING.md rather than left as unexplained upgrade TODOs.
 
-### 6. Deferred eval extraction tracking
+## Intentionally deferred: separate eval binary
 
-- [x] Confirm the existing separate-binary extraction issue, PLA-1037, is still
-  in Backlog and covers replay, corpus commands, eval running, and adjudication.
-- [ ] Explicitly include `runs label` and `internal/label` in that issue's scope;
-  they are deliberately excluded here but not named in the current ticket.
-- [ ] Implement `roast-eval` in a later phase. No such binary exists yet, and it
-  must not ship in the normal GoReleaser/Homebrew artifacts.
+Confirmed October 2, 2026: eval, replay, adjudication, `runs label`, and
+`internal/label` belong in a totally separate binary, not the main Roast CLI or
+its Homebrew package. Their omission here is intentional, not an OSS-readiness
+gap or release blocker. Do not pull them into this migration.
+
+Separate-binary work is tracked in PLA-1037. Its detailed scope and tracking
+will be handled with that work, not as a follow-up required for this release.
 
 No Linear issue was modified during this audit.
 
@@ -189,6 +221,11 @@ states, not proof of a completed production upgrade.
   assumptions, retired services, and leftover public-migration references.
   Public project ownership/import paths and security contact are expected.
 - [x] `go test ./...` and `go vet ./...` pass in the new repository.
+- [x] October 2 fixes also pass focused race tests, Staticcheck, actionlint,
+  shellcheck, and `git diff --check`. Local GoReleaser snapshot and broker Docker
+  builds succeed. The stopped image-inspection container and temporary preview
+  packaging directories were removed; no workflow was dispatched or release
+  published.
 - [x] `govulncheck v1.8.0 ./...` reports zero reachable vulnerabilities. It also
   reports GO-2026-5932 for the unmaintained `golang.org/x/crypto/openpgp` package,
   which Roast neither imports nor calls. No fixed version is listed. This is
@@ -206,6 +243,15 @@ states, not proof of a completed production upgrade.
 - [x] Run adversarial review on this reconstructed journal: five candidates
   refuted; one LOW download-validation ambiguity addressed with the explicit
   anonymous private-asset test and separate checklist entries above.
+- [x] Run adversarial review on the October 2 integrated fixes
+  (`20261002T211914Z-da383c1f`). The one retained candidate had an
+  insufficient-context verdict for overlapping archive globs. Actual snapshot
+  output showed deduplication, not corrupt archives; remove the redundant glob
+  anyway. A fresh snapshot has no duplicate warnings/members and its notices
+  match the complete generated bundle for all six targets. The five dropped
+  candidates do not identify additional defects: the legacy schema covers the
+  archive's full top-level configuration, and the generator's network/tool,
+  container regeneration, cleanup, and union-copy behavior are intentional.
 
 Tracked Go measurements excluding `vendor/`, including tests, at this
 checkpoint: archive 191 files / 63,738 lines / 93 test files; new repo 81 files /
