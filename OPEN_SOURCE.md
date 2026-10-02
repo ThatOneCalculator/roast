@@ -137,9 +137,13 @@ This is packaging work, not a formal legal compliance certification.
 - [x] Document retired `gate.auto_install` / `ROAST_HOOK_INSTALL` behavior and
   old global `ROAST_API_KEY` / `AIGW_API_KEY` semantics versus explicit current
   profiles and role credential sources.
-- [ ] Run a complete upgrade rehearsal from an archive-style configuration and
-  real Homebrew installation, including configuration-URL enrollment and
-  uploads to the configured service, before authorizing user cutover.
+- [x] Rehearse the actual Homebrew upgrade, then use the installed binary for
+  archive-style configuration-URL migration with dummy credentials and live
+  finder/verifier inference against the operator's unchanged current config.
+- [ ] Exercise the production configuration-URL/upload service with deliberate
+  upload consent. This was not part of the authorized local installation test;
+  real uploads remain disabled. Local model/broker/storage fixtures cover the
+  automatic-upload protocol and successful outbox state below.
 
 The public guide is `docs/upgrading.md`. No local Claude settings were inspected
 or changed. The earlier audit wording was too definite: stale entries can
@@ -153,8 +157,9 @@ remain after upgrading; their presence on the operator's machine was not verifie
 This test uncovered a presigned-upload ownership bug: HTTP closed the caller's
 bundle file, so Roast's later close failed and a successful upload stayed
 pending. The uploader now gives HTTP a non-owning reader wrapper. File-reader
-and end-to-end regression tests cover the fix. The installed executable and
-live tap have not been changed for this rehearsal.
+and end-to-end regression tests cover the fix. That isolated rehearsal did not
+change the installed executable or live tap; the subsequent authorized stable
+release and actual Homebrew upgrade are recorded below.
 
 ### 5. Stable-dependency follow-up
 
@@ -202,16 +207,42 @@ No Linear issue was modified during this audit.
   configuration disabled and no GitHub credential, returns HTTP 404.
 - [x] Keep credential preflight in the stable release job, so normal release-PR
   maintenance does not require the tap token.
-- [ ] Push the prepared commits when authorized.
-- [ ] Run and verify remote CI against those commits.
-- [ ] Authorize and test the actual stable-release/cask cutover after upgrade
-  blockers are resolved. Release Please PR #3 is still unmerged.
+- [x] Push the prepared commits and audit fixes (`bf2c1e3`) to the new repo;
+  push archive retirement (`b7d8a17`) to the archive. Integrate the previously
+  approved remote Dependabot update with a normal merge, not a history rewrite.
+- [x] Verify remote CI for prepared main (`37067091356`), release PR
+  (`37067125540`), released main (`37067809440`), and archive retirement
+  (`37066870902`). All pass.
+- [x] Publish `v1.1.0` by merging Release Please PR #3. Release commit:
+  `a7099a3`. Publisher run `37067809367` succeeds, attaching six CLI archives
+  and checksums and updating the existing cask from the new repository. Tap
+  commit: `6b0b3ff3b81a291ec76c1135d04d910829085f2e`.
+- [x] Run the actual `brew update` / `brew upgrade --cask roast` locally.
+  Homebrew upgrades its receipt from 1.0.14 to 1.1.0 and replaces the manually
+  linked preview with `/opt/homebrew/Caskroom/roast/1.1.0/roast`.
+- [x] Inspect the downloaded release archive: checksum matches the cask, Go
+  license and six inventories are present, and no eval/broker binary ships.
+- [x] Run installed-binary `doctor`, configuration-URL migration, and custom
+  skill installation/status. Both real provider roundtrips pass; dummy legacy
+  migration preserves its byte-identical backup, imports the intended inference
+  credential, discards retired fields, leaves uploads disabled, and writes
+  mode-600 config/backup files.
+- [x] Review a seeded slice-guard regression using the installed binary.
+  Finder and independent verifier each make one call; the defect is confirmed,
+  findings exit code 1 is expected, and `runs show` reads the persisted report.
+  Run: `20261002T215456Z-6dd887e5`.
+- [x] Verify the operator's real config is byte-for-byte unchanged and uploads
+  remain disabled. No Claude settings or existing global skills were changed.
+- [x] Verify both repositories remain private. Anonymous access to the actual
+  stable macOS arm64 asset returns HTTP 404; Homebrew's authenticated download
+  succeeds. The installed `doctor` release-check warning is expected because
+  that informational checker does not authenticate to the private repository.
 
-Live tap state on the checkpoint date is still version 1.0.15, with assets from
-`roast-archive`. The new repository has only preview releases. Local Homebrew
-records version 1.0.14, while its executable path is linked to `roast-preview`
-preview-3-1; a future cask upgrade will replace that link. These are separate
-states, not proof of a completed production upgrade.
+Before this authorized October 2 release, the live tap was 1.0.15 from the
+archive and the local receipt was 1.0.14 with preview-3-1 linked manually. The
+live cask and local installation now both use 1.1.0 from the new repository.
+This completes the private stable cutover/local-install test, not the public
+visibility or final history-rewrite phase.
 
 ## Audit and validation journal
 
@@ -224,8 +255,8 @@ states, not proof of a completed production upgrade.
 - [x] October 2 fixes also pass focused race tests, Staticcheck, actionlint,
   shellcheck, and `git diff --check`. Local GoReleaser snapshot and broker Docker
   builds succeed. The stopped image-inspection container and temporary preview
-  packaging directories were removed; no workflow was dispatched or release
-  published.
+  packaging directories were removed. This validation initially ran without
+  publishing; the later authorized remote release/install checks are above.
 - [x] `govulncheck v1.8.0 ./...` reports zero reachable vulnerabilities. It also
   reports GO-2026-5932 for the unmaintained `golang.org/x/crypto/openpgp` package,
   which Roast neither imports nor calls. No fixed version is listed. This is
@@ -260,7 +291,9 @@ controlled before/after measurement of the Fantasy rewrite alone.
 
 ## Final publication phase, not authorized yet
 
-- [ ] Finish the upgrade, tests, attribution, and cutover follow-ups above.
+- [x] Complete the approved upgrade fixes, tests, notice packaging, private
+  stable cutover, and actual local Homebrew installation checks above. Human
+  attribution review and the optional production upload rehearsal remain open.
 - [ ] Final legal/content review for internal details, credentials, employee or
   user information, reputational commentary, and third-party material. Automated
   secret scans are not a substitute for this review.
