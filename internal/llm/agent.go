@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -337,6 +338,7 @@ func runAgent(ctx context.Context, c *client, system, user string, opts Converse
 		}),
 	)
 
+	ctx = context.WithValue(ctx, sessionContextKey{}, "roast-"+rand.Text())
 	_, runErr := agent.Generate(ctx, fantasy.AgentCall{Prompt: user})
 	var permanent permanentModelError
 	if errors.As(runErr, &permanent) {

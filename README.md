@@ -299,6 +299,12 @@ terms before using Roast on sensitive repositories. See the
 [security model](docs/security-model.md) for the complete trust and artifact
 boundaries.
 
+Every inference request carries an `X-Agent-Session-Id` identifying its Roast
+conversation. Tool turns, structured-output corrections, and retries retain the
+same ID. Separate finder calls and each independent verifier conversation get
+different IDs, including when they share a client or run concurrently. The ID
+does not identify a person and is not a per-request ID or a whole-review run ID.
+
 ## Resource limits
 
 Roast applies the same resource controls to hosted providers, gateways, and

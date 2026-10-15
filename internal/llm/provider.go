@@ -162,6 +162,8 @@ func protocolName(cfg ClientConfig) string {
 
 type captureError struct{ err error }
 
+type sessionContextKey struct{}
+
 func (e *captureError) Error() string { return e.err.Error() }
 func (e *captureError) Unwrap() error { return e.err }
 
@@ -186,6 +188,10 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	t.mu.Unlock()
 	if failed != nil {
 		return nil, failed
+	}
+	if sessionID, ok := req.Context().Value(sessionContextKey{}).(string); ok {
+		req = req.Clone(req.Context())
+		req.Header.Set("X-Agent-Session-Id", sessionID)
 	}
 	resp, err := t.base.RoundTrip(req)
 	if err != nil || resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 || t.cfg.CaptureResponse == nil {
