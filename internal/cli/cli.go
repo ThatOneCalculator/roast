@@ -156,7 +156,10 @@ type reviewFlags struct {
 }
 
 const (
+	defaultMaxTurns          = 16
 	surveyMaxTurnsDefault    = 40
+	defaultDeadline          = 10 * time.Minute
+	surveyDeadlineDefault    = 25 * time.Minute
 	defaultRequestTimeout    = 10 * time.Minute
 	defaultMaxAttempts       = 4
 	defaultMaxTotalTokens    = 3_000_000
@@ -269,7 +272,7 @@ func newRootCommand(stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(reviewCmd)
 	root.AddCommand(newRunsCommand(stdout, stderr))
 	root.AddCommand(newGateCommand(stdout))
-	root.AddCommand(newConfigCommand(stdout))
+	root.AddCommand(newConfigCommand(stdout, stderr))
 	root.AddCommand(newSkillCommand(stdout))
 	root.AddCommand(newDoctorCommand(stdout))
 	return root
@@ -324,6 +327,23 @@ func noArgs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// usageArgs makes a Cobra positional-argument validator report usage errors.
+func usageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := validate(cmd, args); err != nil {
+			return &usageError{msg: err.Error()}
+		}
+		return nil
+	}
+}
+
+// showHelp makes a command group runnable, so its noArgs validator rejects an
+// unknown subcommand as a usage error instead of Cobra printing help and
+// exiting cleanly.
+func showHelp(cmd *cobra.Command, _ []string) error {
+	return cmd.Help()
+}
+
 func flagUsageError(_ *cobra.Command, err error) error {
 	return &usageError{msg: err.Error()}
 }
@@ -344,10 +364,10 @@ func addReviewFlags(cmd *cobra.Command, f *reviewFlags) {
 	fl.BoolVar(&f.quick, "quick", false, "single-shot finder pass without verification")
 	fl.BoolVar(&f.noVerify, "no-verify", false, "skip cross-model verification")
 	fl.BoolVar(&f.interactive, "interactive", false, "let the finder navigate the local checkout")
-	fl.IntVar(&f.maxTurns, "max-turns", 16, "maximum interactive finder turns")
-	fl.DurationVar(&f.deadline, "deadline", 0, "interactive finder work deadline (0 disables)")
-	fl.DurationVar(&f.requestTimeout, "request-timeout", 0, "timeout for each inference request (default 10m; 0 disables)")
-	fl.IntVar(&f.maxTokensTotal, "max-tokens-total", 0, "shared finder/verifier token ceiling (0 disables)")
+	fl.IntVar(&f.maxTurns, "max-turns", defaultMaxTurns, fmt.Sprintf("maximum interactive finder turns (%d with --scope repo)", surveyMaxTurnsDefault))
+	fl.DurationVar(&f.deadline, "deadline", 0, fmt.Sprintf("interactive finder work deadline (default %s, %s with --scope repo; 0 disables)", shortDuration(defaultDeadline), shortDuration(surveyDeadlineDefault)))
+	fl.DurationVar(&f.requestTimeout, "request-timeout", 0, fmt.Sprintf("timeout for each inference request (default %s; 0 disables)", shortDuration(defaultRequestTimeout)))
+	fl.IntVar(&f.maxTokensTotal, "max-tokens-total", 0, fmt.Sprintf("shared finder/verifier token ceiling (default %d; 0 disables)", defaultMaxTotalTokens))
 	fl.IntVar(&f.maxVerified, "max-verified", 25, "maximum findings sent to the verifier (0 disables)")
 	fl.IntVar(&f.maxAttempts, "max-attempts", 4, "maximum provider and structured-output attempts")
 	fl.BoolVar(&f.showDropped, "show-dropped", false, "render malformed and refuted candidates")
@@ -356,6 +376,18 @@ func addReviewFlags(cmd *cobra.Command, f *reviewFlags) {
 	fl.StringVar(&f.authorModel, "author-model", "", "author model or family; use roles.finder.author_routes to select an independent profile")
 	addRoleFlags(fl, "finder", &f.finder)
 	addRoleFlags(fl, "verifier", &f.verifier)
+}
+
+// shortDuration renders whole-minute durations as "10m" rather than "10m0s".
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 func addRoleFlags(fl interface {
@@ -369,7 +401,8 @@ func addRoleFlags(fl interface {
 }
 
 func runReview(cmd *cobra.Command, f *reviewFlags, stdout, stderr io.Writer) error {
-	if err := maybeProvision(cmd, f.configPath, stdout); err != nil {
+	resolved := func() bool { return rolesResolve(cmd.Flags().Changed, f.finder, f.verifier) }
+	if err := maybeProvision(cmd, f.configPath, stderr, resolved); err != nil {
 		return err
 	}
 	return runReviewCommand(cmd.Context(), cmd.Flags().Changed, f, stdout, stderr)
@@ -631,9 +664,9 @@ func runReviewCommand(ctx context.Context, changed func(string) bool, f *reviewF
 	}
 	deadlineDuration := f.deadline
 	if !changed("deadline") {
-		deadlineDuration = 10 * time.Minute
+		deadlineDuration = defaultDeadline
 		if survey {
-			deadlineDuration = 25 * time.Minute
+			deadlineDuration = surveyDeadlineDefault
 		}
 		if value := os.Getenv("ROAST_DEADLINE"); value != "" {
 			deadlineDuration, err = parseNonNegativeDuration("ROAST_DEADLINE", value)
@@ -976,24 +1009,22 @@ func parseNonNegativeDuration(name, raw string) (time.Duration, error) {
 	return value, nil
 }
 
+// applyRoleFlags applies command-line role overrides. Endpoint and protocol
+// flags follow the same rules as their ROAST_<ROLE>_* variables, including
+// which credential may follow the role to its new endpoint.
 func applyRoleFlags(changed func(string) bool, name string, role config.ResolvedRole, flags roleFlags) config.ResolvedRole {
-	previousProtocol := role.Protocol
+	var baseURL, protocol *string
 	if changed(name + "-base-url") {
-		role.BaseURL = flags.baseURL
+		baseURL = &flags.baseURL
+	}
+	if changed(name + "-protocol") {
+		protocol = &flags.protocol
+	}
+	if baseURL != nil || protocol != nil {
+		role = config.OverrideEndpoint(name, role, baseURL, protocol)
 	}
 	if changed(name + "-model") {
 		role.Model = flags.model
-	}
-	if changed(name + "-protocol") {
-		role.Protocol = flags.protocol
-		if !changed(name+"-base-url") && role.BaseURL == config.DefaultBaseURL(previousProtocol) {
-			role.BaseURL = config.DefaultBaseURL(role.Protocol)
-			// The endpoint moved between public providers. Do not carry a
-			// credential resolved for the previous protocol across that trust
-			// boundary; use only an explicit role/generic key or the destination
-			// provider's environment variable.
-			role.APIKey = config.EnvironmentAPIKey(name, role.Protocol)
-		}
 	}
 	if changed(name + "-max-output-tokens") {
 		role.MaxOutputTokens = flags.maxOutputTokens

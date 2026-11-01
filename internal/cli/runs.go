@@ -67,7 +67,7 @@ func newRunsCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(
 		newRunsShowCommand(stdout), newRunsCheckoutCommand(stdout, stderr),
 		newRunsPruneCommand(stdout, stderr),
-		newRunsSyncCommand(stdout), newRunsStatusCommand(stdout),
+		newRunsSyncCommand(stdout, stderr), newRunsStatusCommand(stdout),
 	)
 	return cmd
 }
@@ -94,7 +94,7 @@ func tailRunLines(files []string, limit int) []string {
 
 func newRunsShowCommand(stdout io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use: "show <run-id>", Short: "Print a run's Markdown report", Args: cobra.ExactArgs(1),
+		Use: "show <run-id>", Short: "Print a run's Markdown report", Args: usageArgs(cobra.ExactArgs(1)),
 		SilenceUsage: true, SilenceErrors: true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			path, err := record.ReportPath(args[0])
@@ -116,7 +116,7 @@ func newRunsShowCommand(stdout io.Writer) *cobra.Command {
 func newRunsCheckoutCommand(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use: "checkout <run-id> [dir]", Short: "Materialize a run snapshot into a linked worktree",
-		Args: cobra.RangeArgs(1, 2), SilenceUsage: true, SilenceErrors: true,
+		Args: usageArgs(cobra.RangeArgs(1, 2)), SilenceUsage: true, SilenceErrors: true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			meta, _, err := record.ReadMeta(args[0])
 			if err != nil {
