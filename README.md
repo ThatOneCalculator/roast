@@ -18,6 +18,10 @@ With Homebrew:
 brew install --cask bluesky-social/tap/roast
 ```
 
+Homebrew 7 and later only load casks from third-party taps you trust, though
+naming the cask in full (as above) counts. For a plain `brew upgrade` to update Roast,
+also run `brew trust --tap bluesky-social/tap`.
+
 Or download an archive for macOS, Linux, or Windows (amd64 and arm64) from
 [GitHub Releases](https://github.com/bluesky-social/roast/releases) and verify
 it against the published SHA-256 checksums. Or, with Go 1.27.3 or newer:
