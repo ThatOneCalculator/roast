@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["local>bluesky-social/.github//renovate/default#v1"],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchFileNames": [".github/tools/**"],
+      "matchDepTypes": ["require", "indirect", "tool"],
+      "groupName": "CI Go tools",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "description": "Actionlint requires the YAML rc.3 parser error API; let actionlint updates migrate this dependency.",
+      "matchManagers": ["gomod"],
+      "matchFileNames": [".github/tools/actionlint/go.mod"],
+      "matchDepNames": ["go.yaml.in/yaml/v4"],
+      "enabled": false
+    },
+    {
+      "description": "Gitleaks must migrate its Lipgloss import upstream; replacing the indirect module path alone does not migrate its code.",
+      "matchManagers": ["gomod"],
+      "matchFileNames": [".github/tools/gitleaks/go.mod"],
+      "matchDepNames": ["github.com/charmbracelet/lipgloss"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ]
+}

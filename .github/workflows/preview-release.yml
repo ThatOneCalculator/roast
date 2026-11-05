@@ -1,0 +1,71 @@
+name: Preview Release
+
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: preview-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build preview prerelease
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout selected revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            .github/tools/*/go.sum
+
+      - name: Test
+        run: go test ./...
+
+      - name: Set preview metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="preview-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "tag=${version}"
+            echo "version=${version}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Build preview archives
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: v2.19.0
+          args: release --snapshot --clean
+        env:
+          ROAST_PREVIEW_VERSION: ${{ steps.metadata.outputs.version }}
+
+      - name: Create preview prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_COMMIT: ${{ steps.metadata.outputs.commit }}
+          PREVIEW_TAG: ${{ steps.metadata.outputs.tag }}
+          PREVIEW_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "${PREVIEW_TAG}" dist/roast-preview_* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${PREVIEW_COMMIT}" \
+            --title "Roast preview ${PREVIEW_VERSION}" \
+            --notes "Manually dispatched OSS preview. The executable is named roast-preview and this prerelease is not a production update." \
+            --prerelease

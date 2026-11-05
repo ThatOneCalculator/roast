@@ -1,0 +1,12 @@
+.git
+.github/*
+!.github/tools/
+.github/tools/*
+!.github/tools/licenses/
+dist
+bin
+THIRD_PARTY_LICENSES
+roast
+roast.exe
+roast-broker
+*.tar.gz
